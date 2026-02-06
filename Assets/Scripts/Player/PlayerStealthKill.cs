@@ -11,6 +11,7 @@ namespace Game.Player
         [Header("Tuning")]
         [SerializeField] private LayerMask enemyLayer;
         [SerializeField, Range(0.2f, 2f)] private float killRadius = 0.6f;
+        [Tooltip("Cuanto más alto, más estricto para estar detrás.")]
         [SerializeField, Range(0f, 1f)] private float behindDotThreshold = 0.35f;
 
         [Header("Reward")]
@@ -23,18 +24,19 @@ namespace Game.Player
         }
 
         /// <summary>
-        /// Intento de stealth kill usando el botón de ATTACK, pero solo si estás en Crouch/LayDown
-        /// y el enemigo NO te está viendo (y estás detrás).
+        /// Intento de stealth kill usando el botón de ATTACK,
+        /// pero solo si estás en Crouch/LayDown y el enemigo NO te ve y estás detrás.
         /// Devuelve true si mata a alguien.
         /// </summary>
         public bool TryStealthKill()
         {
             if (input == null) return false;
 
-            // Debe estar en modo sigilo (crouch o laydown)
+            // 1) Debe estar en modo sigilo
             if (!input.IsCrouching && !input.IsLayDown)
                 return false;
 
+            // 2) Buscar enemigos cercanos
             var hits = Physics2D.OverlapCircleAll(transform.position, killRadius, enemyLayer);
             if (hits == null || hits.Length == 0) return false;
 
@@ -45,23 +47,26 @@ namespace Game.Player
                 var target = col.GetComponentInParent<Game.Enemies.EnemyBase>();
                 if (target == null) continue;
 
-                // ✅ Si el enemigo TE VE, no es stealth
+                // 3) Si el enemigo te ve, no hay stealth
                 if (target.CanSeePlayer())
                     continue;
 
-                // “Detrás” del enemigo (asumiendo facing por scale.x)
+                // 4) “Detrás” del enemigo (asumiendo facing por scale.x)
                 int facing = (target.transform.localScale.x < 0f) ? -1 : 1;
                 Vector2 enemyForward = (facing < 0) ? Vector2.left : Vector2.right;
 
                 Vector2 toPlayer = ((Vector2)transform.position - (Vector2)target.transform.position).normalized;
+
+                // Si estás detrás: dot con forward es negativo.
                 float dot = Vector2.Dot(enemyForward, toPlayer);
                 bool isBehind = dot < -behindDotThreshold;
                 if (!isBehind) continue;
 
+                // 5) Ejecutar kill
                 if (TryKillEnemy(target))
                 {
                     mana?.AddMana(manaReward);
-                    return true; // 1 kill por ataque
+                    return true;
                 }
             }
 

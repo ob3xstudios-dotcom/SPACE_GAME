@@ -1,4 +1,6 @@
-﻿using UnityEngine;
+﻿using System;
+using System.Reflection;
+using UnityEngine;
 using Game.Input;
 
 namespace Game.Player
@@ -12,14 +14,19 @@ namespace Game.Player
         public CharacterStats stats;
 
         [Header("Debug")]
-        public bool debugLogs = true;
+        public bool debugLogs = false;
 
+        [Header("Facing / Visual")]
         [SerializeField] private Transform visualRoot;
 
+        // --------------------
+        // GROUND / WALL
+        // --------------------
         [Header("Ground Check")]
         public Transform groundCheck;
         public float groundCheckRadius = 0.2f;
         public LayerMask groundLayer;
+        [Tooltip("Solo cuenta como suelo si la normal apunta hacia arriba (evita que pared lateral te ponga grounded).")]
         [SerializeField, Range(0f, 1f)] private float groundNormalMinY = 0.55f;
 
         [Header("Wall Check")]
@@ -36,6 +43,51 @@ namespace Game.Player
         [Header("Tuning (Designer) - Wall Input")]
         [SerializeField, Range(0.01f, 0.5f)] private float wallInputDeadzone = 0.2f;
         [SerializeField] private bool requirePushIntoWallForSlide = true;
+
+        // --------------------
+        // LEDGE GRAB / HANG
+        // --------------------
+        [Header("Ledge Grab (Designer)")]
+        [SerializeField] private bool enableLedgeGrab = true;
+        [SerializeField, Range(0.05f, 0.30f)] private float ledgeGrabCooldown = 0.12f;
+        [Tooltip("Permite agarrar si vy <= este valor. (10 = permite también subiendo).")]
+        [SerializeField, Range(-5f, 20f)] private float ledgeGrabMaxVerticalSpeedToAllow = 10f;
+
+        [Tooltip("Capas que cuentan como 'suelo' arriba del borde (normalmente Ground + Wall).")]
+        [SerializeField] private LayerMask ledgeTopLayer;
+
+        [Header("Ledge Probe (unidades mundo)")]
+        [Tooltip("Distancia hacia delante desde el borde del collider para buscar pared (manos).")]
+        [SerializeField, Range(0.05f, 0.6f)] private float ledgeForwardCheck = 0.20f;
+        [Tooltip("Altura desde el TOP del capsule hacia ABAJO donde están las manos (0.15–0.35 suele ir bien).")]
+        [SerializeField, Range(0.05f, 0.6f)] private float ledgeHandsFromTop = 0.22f;
+        [Tooltip("Altura extra por encima de manos para comprobar espacio libre (cabeza).")]
+        [SerializeField, Range(0.05f, 0.8f)] private float ledgeHeadClearance = 0.30f;
+        [Tooltip("Adelante extra para tirar el ray down y encontrar la plataforma superior.")]
+        [SerializeField, Range(0.00f, 0.6f)] private float ledgeTopForward = 0.12f;
+        [Tooltip("Cuánto baja el ray para encontrar la plataforma superior.")]
+        [SerializeField, Range(0.05f, 0.8f)] private float ledgeTopDown = 0.30f;
+        [Tooltip("Separación mínima respecto a la pared al colgarse (evita meterse hacia dentro / centrarse).")]
+        [SerializeField, Range(0.00f, 0.20f)] private float hangWallSkin = 0.04f;
+        [Tooltip("Máxima distancia que puede 'snapear' al entrar en hang (para que no se vaya al centro).")]
+        [SerializeField, Range(0.05f, 1.0f)] private float maxHangSnapDistance = 0.35f;
+
+        [Tooltip("Offset final aplicado al punto corner (X se multiplica por facingDir).")]
+        [SerializeField] private Vector2 ledgeHangOffset = new Vector2(0.10f, -0.22f);
+
+        [Header("Ledge Hang / Exit")]
+        [SerializeField] private float ledgeClimbJumpY = 10f;
+        [SerializeField] private float ledgeClimbJumpX = 1.5f;
+
+        [Tooltip("Si ON, exige empujar hacia la pared para poder agarrar. En prototipo suele ir mejor OFF.")]
+        [SerializeField] private bool requirePushIntoWallToGrab = false;
+
+        [Header("Hang - PM Rules")]
+        [Tooltip("Umbral para considerar DOWN (MoveInput.y <= -threshold).")]
+        [SerializeField, Range(0.1f, 1f)] private float hangDownThreshold = 0.5f;
+
+        [Tooltip("Si mantienes DOWN tras soltarte del hang, se cancela el wall check hasta soltar DOWN.")]
+        [SerializeField] private bool disableWallWhileDownHeldAfterDrop = true;
 
         // --------------------
         // COMBAT
@@ -75,21 +127,27 @@ namespace Game.Player
         [Header("Parry / Move Lock")]
         [SerializeField, Range(5f, 200f)] private float parryMoveStopDecel = 90f;
         private float parryMoveLockTimer;
+
         public bool IsMoveLockedByParry => parryMoveLockTimer > 0f;
 
-        /// <summary>Bloquea SOLO movimiento horizontal durante seconds (parry).</summary>
+        /// <summary>Bloquea SOLO el movimiento (input X) durante seconds. Ideal para Parry.</summary>
         public void LockMovement(float seconds)
         {
             parryMoveLockTimer = Mathf.Max(parryMoveLockTimer, Mathf.Max(0f, seconds));
             rb.velocity = new Vector2(0f, rb.velocity.y);
         }
 
+        // --------------------
+        // RUNTIME STATE
+        // --------------------
         private float attackCooldownTimer;
 
         private Rigidbody2D rb;
         private CapsuleCollider2D capsule;
         private PlayerAnimatorDriver animDriver;
-        private PlayerStealthKill stealthKill;
+
+        private MonoBehaviour stealthKill; // lo buscamos por tipo para no acoplar
+        private MethodInfo stealthKillTryMethod;
 
         private bool isGrounded;
         private bool isTouchingWall;
@@ -113,7 +171,7 @@ namespace Game.Player
         private float wallCheckLocalXAbs;
 
         private Vector2 lockedAttackDir = Vector2.right;
-        private int lockedAttackDirType = 0; // 0=Side,1=Up,2=Down
+        private int lockedAttackDirType = 0;
 
         private bool isAttacking;
         private bool canCancelAttack;
@@ -126,24 +184,34 @@ namespace Game.Player
 
         private Coroutine hitStopCo;
 
+        // HANG
+        private bool isHanging;
+        private float ledgeGrabCooldownTimer;
+        private Vector2 hangPositionLocked;
+
+        private RigidbodyType2D cachedBodyType;
+        private RigidbodyConstraints2D cachedConstraints;
+        private float cachedGravityScale;
+
+        private bool suppressWallWhileDownHeld;
+
+        // Optional: levantar al pulsar jump
+        private MethodInfo forceStandUpMethod;
 
         public bool FacingLeft => facingDir < 0;
         public bool IsGrounded => isGrounded;
         public bool IsAttacking => isAttacking;
+        public bool IsHanging => isHanging;
 
-        // ✅ Para que compile con el AnimatorDriver que lee IsHanging
-        public bool IsHanging => false;
-
-        // ✅ Para el Animator
-        public bool IsCrouching => input != null && input.IsCrouching;
-        public bool IsLayDown => input != null && input.IsLayDown;
+        // Para Animator (si lo usáis)
+        public bool IsCrouching => input != null && GetBoolProp(input, "IsCrouching");
+        public bool IsLayDown => input != null && GetBoolProp(input, "IsLayDown");
 
         private void Awake()
         {
             rb = GetComponent<Rigidbody2D>();
             capsule = GetComponent<CapsuleCollider2D>();
             animDriver = GetComponent<PlayerAnimatorDriver>();
-            stealthKill = GetComponent<PlayerStealthKill>();
 
             if (input == null) input = GetComponent<InputReader>();
             if (visualRoot == null) visualRoot = transform;
@@ -163,24 +231,48 @@ namespace Game.Player
             if (wallCheck != null)
                 wallCheckLocalXAbs = Mathf.Abs(wallCheck.localPosition.x);
 
+            if (ledgeTopLayer.value == 0)
+                ledgeTopLayer = groundLayer | wallLayer;
+
             ApplyFacing(1);
+
+            // Optional hooks via reflection
+            forceStandUpMethod = input != null
+                ? input.GetType().GetMethod("ForceStandUp", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
+                : null;
+
+            // Buscar PlayerStealthKill sin acoplar a clase concreta
+            // (si existe, intentamos llamar TryStealthKill())
+            var comps = GetComponents<MonoBehaviour>();
+            foreach (var c in comps)
+            {
+                if (c == null) continue;
+                if (c.GetType().Name == "PlayerStealthKill")
+                {
+                    stealthKill = c;
+                    stealthKillTryMethod = c.GetType().GetMethod("TryStealthKill", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+                    break;
+                }
+            }
         }
 
         private void Update()
         {
             if (stats == null || input == null) return;
 
-            // Parry move-lock
+            // cooldowns
+            ledgeGrabCooldownTimer -= Time.deltaTime;
+
             if (parryMoveLockTimer > 0f)
                 parryMoveLockTimer -= Time.deltaTime;
 
-            // Input limpio (para wall feel)
+            // Input limpio (para wall/ledge/hang)
             float inputX = Mathf.Clamp(input.MoveInput.x, -1f, 1f);
             float inputY = Mathf.Clamp(input.MoveInput.y, -1f, 1f);
             if (Mathf.Abs(inputX) < wallInputDeadzone) inputX = 0f;
             if (Mathf.Abs(inputY) < wallInputDeadzone) inputY = 0f;
 
-            // Attack lock timers
+            // Timers de ataque (cancel window)
             if (isAttacking)
             {
                 attackStateTimer -= Time.deltaTime;
@@ -192,6 +284,17 @@ namespace Game.Player
                     isAttacking = false;
                     canCancelAttack = false;
                 }
+            }
+
+            // Si ya no estás manteniendo DOWN, se re-habilita wall check (tras drop del hang)
+            if (suppressWallWhileDownHeld && inputY > -hangDownThreshold)
+                suppressWallWhileDownHeld = false;
+
+            // Si está colgado, solo lógica de hang
+            if (isHanging)
+            {
+                UpdateHanging(inputX, inputY);
+                return;
             }
 
             // Flip por movimiento (si no está lockeado por parry)
@@ -212,6 +315,15 @@ namespace Game.Player
             bool dashPressed = stats.hasDash && input.ConsumeDashPressed();
             bool attackPressed = input.ConsumeAttackPressed();
 
+            // ✅ Jump desde Crouch/LayDown: NO salta; intenta levantarse
+            if (jumpPressed && (IsCrouching || IsLayDown))
+            {
+                forceStandUpMethod?.Invoke(input, null);
+                jumpPressed = false;
+                jumpBufferTimer = 0f;
+            }
+
+            // Buffer jump
             if (jumpPressed)
                 jumpBufferTimer = stats.jumpBufferTime;
 
@@ -220,6 +332,7 @@ namespace Game.Player
             {
                 if (isAttacking && canCancelAttack)
                     CancelAttack("dash");
+
                 TryStartDash();
             }
 
@@ -227,14 +340,20 @@ namespace Game.Player
             if (jumpPressed && isAttacking && canCancelAttack)
                 CancelAttack("jump");
 
-            // ✅ ATTACK botón único:
-            // En Crouch/LayDown intentamos stealth kill primero; si no, ataque normal.
+            // ✅ ATAQUE:
+            // Si estás en Crouch/LayDown, primero intentamos stealth kill con el MISMO botón.
             if (attackPressed)
             {
                 bool didStealthKill = false;
 
-                if (stealthKill != null && (IsCrouching || IsLayDown))
-                    didStealthKill = stealthKill.TryStealthKill();
+                if ((IsCrouching || IsLayDown) && stealthKill != null && stealthKillTryMethod != null)
+                {
+                    try
+                    {
+                        didStealthKill = (bool)stealthKillTryMethod.Invoke(stealthKill, null);
+                    }
+                    catch { didStealthKill = false; }
+                }
 
                 if (!didStealthKill)
                 {
@@ -243,7 +362,6 @@ namespace Game.Player
                 }
                 else
                 {
-                    // mini cooldown tras kill para que no se sienta “spam”
                     attackCooldownTimer = Mathf.Max(attackCooldownTimer, attackCooldown * 0.25f);
                 }
             }
@@ -270,11 +388,21 @@ namespace Game.Player
             // Recargar air dashes
             if (isGrounded)
                 airDashesRemaining = stats.airDashesMax;
+
+            // Ledge grab (después de checks)
+            if (enableLedgeGrab && !suppressWallWhileDownHeld)
+            {
+                // Recomendación: no permitir hang si estás crouch/laydown
+                if (!IsCrouching && !IsLayDown)
+                    TryLedgeGrab(inputX);
+            }
         }
 
         private void FixedUpdate()
         {
             if (stats == null || input == null) return;
+
+            if (isHanging) return;
 
             if (isDashing)
             {
@@ -284,7 +412,7 @@ namespace Game.Player
 
             HandleWallSlide();
 
-            // Parry lock: no Move()
+            // ✅ Parry move lock: no Move()
             if (IsMoveLockedByParry)
             {
                 float newVX = Mathf.MoveTowards(rb.velocity.x, 0f, parryMoveStopDecel * Time.fixedDeltaTime);
@@ -297,6 +425,9 @@ namespace Game.Player
             ApplyBetterJumpGravity();
         }
 
+        // --------------------
+        // ATTACK
+        // --------------------
         private void StartAttack()
         {
             ComputeAndLockAttackDirection();
@@ -310,10 +441,10 @@ namespace Game.Player
 
             bool didHit = Attack(lockedAttackDir);
 
+            attackCooldownTimer = attackCooldown;
+
             if (debugLogs)
                 Debug.Log($"[PLAYER ATTACK] dirType={lockedAttackDirType} dir={lockedAttackDir} didHit={didHit}");
-
-            attackCooldownTimer = attackCooldown;
 
             if (didHit)
             {
@@ -372,6 +503,59 @@ namespace Game.Player
             lockedAttackDir = new Vector2(facingDir, 0f);
         }
 
+        private bool Attack(Vector2 dir)
+        {
+            if (attackPoint == null) return false;
+
+            if (!allowVerticalAim)
+                dir = new Vector2(facingDir, 0f);
+
+            if (dir.sqrMagnitude < 0.0001f)
+                dir = new Vector2(facingDir, 0f);
+
+            float offset = attackOffset;
+            if (offset <= 0f)
+                offset = Mathf.Max(0.01f, Mathf.Abs(attackPoint.localPosition.x));
+
+            Vector2 hitPos = (Vector2)transform.position + dir.normalized * offset;
+            attackPoint.position = hitPos;
+
+            int count = Physics2D.OverlapCircleNonAlloc(hitPos, attackRadius, attackHits, enemyLayer);
+            bool didHit = false;
+
+            for (int i = 0; i < count; i++)
+            {
+                var hitCol = attackHits[i];
+                if (hitCol == null) continue;
+
+                var dmgable =
+                    hitCol.GetComponent<Game.Combat.IDamageable>() ??
+                    hitCol.GetComponentInParent<Game.Combat.IDamageable>();
+
+                if (dmgable != null)
+                {
+                    didHit = true;
+                    dmgable.TakeDamage(stats.attackDamage, transform.position);
+                    continue;
+                }
+
+                var health =
+                    hitCol.GetComponent<Game.Combat.Health>() ??
+                    hitCol.GetComponentInParent<Game.Combat.Health>();
+
+                if (health != null)
+                {
+                    didHit = true;
+                    health.TakeDamage(stats.attackDamage, transform.position);
+                }
+            }
+
+            return didHit;
+        }
+
+        // --------------------
+        // MOVE / PHYSICS
+        // --------------------
         private void Move()
         {
             float inputX = Mathf.Clamp(input.MoveInput.x, -1f, 1f);
@@ -439,6 +623,31 @@ namespace Game.Player
             rb.velocity = new Vector2(rb.velocity.x, stats.jumpForce);
         }
 
+        private void ApplyBetterJumpGravity()
+        {
+            float vy = rb.velocity.y;
+
+            if (vy < stats.maxFallSpeed)
+                rb.velocity = new Vector2(rb.velocity.x, stats.maxFallSpeed);
+
+            if (vy < -0.01f)
+            {
+                rb.gravityScale = stats.gravityScale * stats.fallGravityMultiplier;
+                return;
+            }
+
+            if (Mathf.Abs(vy) < stats.apexThreshold)
+            {
+                rb.gravityScale = stats.gravityScale * stats.apexGravityMultiplier;
+                return;
+            }
+
+            rb.gravityScale = stats.gravityScale;
+        }
+
+        // --------------------
+        // DASH
+        // --------------------
         private void TryStartDash()
         {
             if (isDashing) return;
@@ -477,8 +686,17 @@ namespace Game.Player
             rb.gravityScale = defaultGravityScale;
         }
 
+        // --------------------
+        // WALL
+        // --------------------
         private void HandleWallSlide()
         {
+            if (suppressWallWhileDownHeld)
+            {
+                isWallSliding = false;
+                return;
+            }
+
             isWallSliding = false;
 
             if (isGrounded) return;
@@ -504,12 +722,14 @@ namespace Game.Player
 
         private void WallJump()
         {
+            if (suppressWallWhileDownHeld) return;
+
             bool canWallJump = isWallSliding || wallCoyoteTimer > 0f;
             if (!canWallJump) return;
 
             int jumpDir = (wallSide != 0) ? -wallSide : -facingDir;
-
             rb.velocity = new Vector2(jumpDir * stats.wallJumpForceX, stats.wallJumpForceY);
+
             ApplyFacing(jumpDir);
 
             wallJumpLockTimer = wallJumpLockTime;
@@ -517,41 +737,31 @@ namespace Game.Player
             wallCoyoteTimer = 0f;
         }
 
-        private void ApplyBetterJumpGravity()
-        {
-            float vy = rb.velocity.y;
-
-            if (vy < stats.maxFallSpeed)
-                rb.velocity = new Vector2(rb.velocity.x, stats.maxFallSpeed);
-
-            if (vy < -0.01f)
-            {
-                rb.gravityScale = stats.gravityScale * stats.fallGravityMultiplier;
-                return;
-            }
-
-            if (Mathf.Abs(vy) < stats.apexThreshold)
-            {
-                rb.gravityScale = stats.gravityScale * stats.apexGravityMultiplier;
-                return;
-            }
-
-            rb.gravityScale = stats.gravityScale;
-        }
-
+        // --------------------
+        // CHECKS
+        // --------------------
         private void CheckGround()
         {
             if (groundCheck == null) return;
 
             float dist = groundCheckRadius + 0.06f;
             RaycastHit2D hit = Physics2D.Raycast(groundCheck.position, Vector2.down, dist, groundLayer);
-
             isGrounded = hit.collider != null && hit.normal.y >= groundNormalMinY;
         }
 
         private void CheckWall(float inputYClean)
         {
             if (wallCheck == null) return;
+
+            bool downHeld = inputYClean <= -hangDownThreshold;
+            if (disableWallWhileDownHeldAfterDrop && suppressWallWhileDownHeld && downHeld)
+            {
+                isTouchingWall = false;
+                wallSide = 0;
+                wallStickTimer = 0f;
+                wallCoyoteTimer = 0f;
+                return;
+            }
 
             Vector2 dir = (facingDir > 0) ? Vector2.right : Vector2.left;
             var hit = Physics2D.Raycast(wallCheck.position, dir, wallCheckDistance, wallLayer);
@@ -578,59 +788,166 @@ namespace Game.Player
             }
         }
 
-        private bool Attack(Vector2 dir)
+        // --------------------
+        // LEDGE GRAB / HANG
+        // --------------------
+        private void TryLedgeGrab(float inputXClean)
         {
-            if (attackPoint == null)
+            if (ledgeGrabCooldownTimer > 0f) return;
+            if (isHanging) return;
+            if (isDashing) return;
+            if (isGrounded) return;
+            if (rb.velocity.y > ledgeGrabMaxVerticalSpeedToAllow) return;
+
+            if (requirePushIntoWallToGrab)
             {
-                if (debugLogs) Debug.LogWarning("[PLAYER ATTACK] AttackPoint NO asignado");
-                return false;
+                if (inputXClean == 0f) return;
+                if (Mathf.Sign(inputXClean) != facingDir) return;
             }
 
-            if (!allowVerticalAim)
-                dir = new Vector2(facingDir, 0f);
+            Bounds b = capsule.bounds;
+            Vector2 faceDir = (facingDir > 0) ? Vector2.right : Vector2.left;
 
-            if (dir.sqrMagnitude < 0.0001f)
-                dir = new Vector2(facingDir, 0f);
+            float skin = 0.02f;
+            float halfWidth = b.extents.x;
+            float topY = b.max.y;
 
-            float offset = attackOffset;
-            if (offset <= 0f)
-                offset = Mathf.Max(0.01f, Mathf.Abs(attackPoint.localPosition.x));
+            Vector2 handsOrigin = new Vector2(
+                b.center.x + faceDir.x * (halfWidth + skin),
+                topY - ledgeHandsFromTop
+            );
 
-            Vector2 hitPos = (Vector2)transform.position + dir.normalized * offset;
-            attackPoint.position = hitPos;
+            RaycastHit2D wallHit = Physics2D.Raycast(handsOrigin, faceDir, ledgeForwardCheck, wallLayer);
+            if (!wallHit) return;
 
-            int count = Physics2D.OverlapCircleNonAlloc(hitPos, attackRadius, attackHits, enemyLayer);
+            Vector2 headOrigin = handsOrigin + Vector2.up * ledgeHeadClearance;
+            RaycastHit2D headBlock = Physics2D.Raycast(headOrigin, faceDir, ledgeForwardCheck, wallLayer);
+            if (headBlock) return;
 
-            bool didHit = false;
+            Vector2 topCheckOrigin = headOrigin + faceDir * ledgeTopForward;
+            RaycastHit2D topGround = Physics2D.Raycast(topCheckOrigin, Vector2.down, ledgeTopDown, ledgeTopLayer);
+            if (!topGround) return;
 
-            for (int i = 0; i < count; i++)
+            Vector2 corner = new Vector2(wallHit.point.x, topGround.point.y);
+
+            float hangX = corner.x - faceDir.x * hangWallSkin + (ledgeHangOffset.x * facingDir);
+            float hangY = corner.y + ledgeHangOffset.y;
+
+            Vector2 targetHangPos = new Vector2(hangX, hangY);
+            Vector2 current = transform.position;
+
+            if (Vector2.Distance(current, targetHangPos) > maxHangSnapDistance)
+                targetHangPos = Vector2.MoveTowards(current, targetHangPos, maxHangSnapDistance);
+
+            EnterHang(targetHangPos, corner);
+        }
+
+        private void EnterHang(Vector2 lockedPos, Vector2 corner)
+        {
+            isHanging = true;
+            isWallSliding = false;
+
+            cachedBodyType = rb.bodyType;
+            cachedConstraints = rb.constraints;
+            cachedGravityScale = rb.gravityScale;
+
+            hangPositionLocked = lockedPos;
+
+            transform.position = hangPositionLocked;
+            rb.velocity = Vector2.zero;
+            rb.gravityScale = 0f;
+
+            rb.bodyType = RigidbodyType2D.Kinematic;
+            rb.constraints = RigidbodyConstraints2D.FreezePosition | RigidbodyConstraints2D.FreezeRotation;
+
+            ledgeGrabCooldownTimer = ledgeGrabCooldown;
+            suppressWallWhileDownHeld = false;
+
+            if (debugLogs)
+                Debug.Log($"[HANG] ENTER lockPos={hangPositionLocked} corner={corner} facing={facingDir}");
+        }
+
+        private void ExitHang(string reason = "")
+        {
+            isHanging = false;
+
+            rb.bodyType = cachedBodyType;
+            rb.constraints = cachedConstraints;
+            rb.gravityScale = cachedGravityScale;
+
+            ledgeGrabCooldownTimer = ledgeGrabCooldown;
+
+            if (debugLogs)
+                Debug.Log($"[HANG] EXIT {(string.IsNullOrEmpty(reason) ? "" : $"({reason})")} pos={transform.position}");
+        }
+
+        private void UpdateHanging(float inputXClean, float inputYClean)
+        {
+            transform.position = hangPositionLocked;
+            rb.velocity = Vector2.zero;
+
+            bool downHeld = inputYClean <= -hangDownThreshold;
+            if (downHeld)
             {
-                var hitCol = attackHits[i];
-                if (hitCol == null) continue;
+                ExitHang("down-drop");
+                rb.velocity = new Vector2(0f, 0f);
 
-                var dmgable =
-                    hitCol.GetComponent<Game.Combat.IDamageable>() ??
-                    hitCol.GetComponentInParent<Game.Combat.IDamageable>();
+                if (disableWallWhileDownHeldAfterDrop)
+                    suppressWallWhileDownHeld = true;
 
-                if (dmgable != null)
-                {
-                    didHit = true;
-                    dmgable.TakeDamage(stats.attackDamage, transform.position);
-                    continue;
-                }
-
-                var health =
-                    hitCol.GetComponent<Game.Combat.Health>() ??
-                    hitCol.GetComponentInParent<Game.Combat.Health>();
-
-                if (health != null)
-                {
-                    didHit = true;
-                    health.TakeDamage(stats.attackDamage, transform.position);
-                }
+                return;
             }
 
-            return didHit;
+            // Jump desde hang: OK (sale del hang)
+            if (input.ConsumeJumpPressed())
+            {
+                ExitHang("jump");
+                rb.velocity = new Vector2(ledgeClimbJumpX * facingDir, ledgeClimbJumpY);
+                wallJumpLockTimer = 0f;
+                return;
+            }
+
+            // Dash desde hang: alejarse
+            if (stats.hasDash && input.ConsumeDashPressed())
+            {
+                int dashDir = -facingDir;
+                ExitHang("dash-away");
+                ApplyFacing(dashDir);
+                StartDashOverride(new Vector2(dashDir, 0f));
+                return;
+            }
+        }
+
+        private void StartDashOverride(Vector2 dir)
+        {
+            if (dir.sqrMagnitude < 0.0001f) dir = Vector2.right * facingDir;
+            dir = dir.normalized;
+
+            isDashing = true;
+            dashTimer = stats.dashDuration;
+            dashCooldownTimer = stats.dashCooldown;
+
+            rb.gravityScale = 0f;
+            rb.velocity = dir * stats.dashSpeed;
+        }
+
+        // --------------------
+        // UTIL (reflection-safe)
+        // --------------------
+        private static bool GetBoolProp(object obj, string propName)
+        {
+            if (obj == null) return false;
+            try
+            {
+                var p = obj.GetType().GetProperty(propName, BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+                if (p != null && p.PropertyType == typeof(bool))
+                    return (bool)p.GetValue(obj);
+                var f = obj.GetType().GetField(propName, BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+                if (f != null && f.FieldType == typeof(bool))
+                    return (bool)f.GetValue(obj);
+            }
+            catch { }
+            return false;
         }
     }
 }

@@ -7,6 +7,10 @@ namespace Game.Enemies
     /// - Visión por distancia + (opcional) precheck por layer + raycast de obstáculos
     /// - Memoria (last seen + lastKnownPos)
     /// - Rango de ataque por CAJA X/Y (usando centros de colliders para que "encima" funcione)
+    ///
+    /// ✅ Stealth:
+    /// - Si el Player está en Crouch/LayDown, el enemigo SOLO ve si el Player está delante (según facing del enemigo)
+    /// - Si el Player NO está en stealth, el enemigo ve normal (sin chequeo de facing)
     /// </summary>
     public class EnemySensors : MonoBehaviour
     {
@@ -25,6 +29,16 @@ namespace Game.Enemies
         [Tooltip("Capas que bloquean visión (Walls, Ground, etc). Si está vacío, no bloquea visión.")]
         [SerializeField] private LayerMask obstacleLayer;
 
+        [Header("Stealth Vision")]
+        [Tooltip("Si ON: cuando el player está en crouch/laydown, solo hay LOS si está delante del enemigo.")]
+        [SerializeField] private bool requireFacingOnlyWhenPlayerStealthed = true;
+
+        [Tooltip("Dot mínimo para considerar 'delante'. 0=180º, 0.5≈120º, 0.7≈90º.")]
+        [SerializeField, Range(-1f, 1f)] private float frontDotThreshold = 0.25f;
+
+        [Tooltip("Multiplica la distancia de visión cuando el player está en stealth. 1 = igual, 0.6 = ve menos.")]
+        [SerializeField, Range(0.1f, 1f)] private float stealthViewDistanceMultiplier = 1.0f;
+
         [Header("Attack Range (X/Y box)")]
         [SerializeField, Range(0.05f, 10f)] private float attackRangeX = 1.1f;
         [SerializeField, Range(0.05f, 10f)] private float attackRangeY = 0.6f;
@@ -36,24 +50,29 @@ namespace Game.Enemies
         private float lastSeenTime = -999f;
         private Vector2 lastKnownPlayerPos;
 
-        public Transform Player => player;
+        // Cache player controller para saber si está en stealth
+        private Game.Player.PlayerController cachedPlayerController;
 
+        public Transform Player => player;
         public float ViewDistance => viewDistance;
         public float LoseDistance => viewDistance * loseDistanceMultiplier;
-
         public bool HasLineOfSight => hasLineOfSight;
         public bool HasTargetInMemory => hasLineOfSight || (Time.time - lastSeenTime) <= memoryTime;
-
         public Vector2 LastKnownPlayerPos => lastKnownPlayerPos;
-
         public float AttackRangeX => attackRangeX;
         public float AttackRangeY => attackRangeY;
 
         public void ResolvePlayer()
         {
             if (player != null) return;
+
             var go = GameObject.FindGameObjectWithTag(playerTag);
-            if (go != null) player = go.transform;
+            if (go != null)
+            {
+                player = go.transform;
+                cachedPlayerController = player.GetComponent<Game.Player.PlayerController>()
+                                      ?? player.GetComponentInChildren<Game.Player.PlayerController>(true);
+            }
         }
 
         /// <summary>
@@ -62,7 +81,6 @@ namespace Game.Enemies
         public void TickVision(Vector2 origin)
         {
             ResolvePlayer();
-
             if (player == null)
             {
                 hasLineOfSight = false;
@@ -76,16 +94,41 @@ namespace Game.Enemies
             Vector2 toPlayer = playerCenter - enemyCenter;
             float dist = toPlayer.magnitude;
 
-            if (dist > LoseDistance)
+            // ---------
+            // ✅ Stealth gating: SOLO aplica el "facing check" si el player está en stealth
+            // ---------
+            bool playerStealthed = IsPlayerStealthed();
+
+            float effectiveViewDistance = viewDistance * (playerStealthed ? stealthViewDistanceMultiplier : 1f);
+            float effectiveLoseDistance = (viewDistance * loseDistanceMultiplier) * (playerStealthed ? stealthViewDistanceMultiplier : 1f);
+
+            if (dist > effectiveLoseDistance)
             {
                 hasLineOfSight = false;
                 return;
             }
 
+            if (requireFacingOnlyWhenPlayerStealthed && playerStealthed)
+            {
+                // Facing del enemigo por scale.x
+                int facing = (transform.localScale.x < 0f) ? -1 : 1;
+                Vector2 enemyForward = (facing < 0) ? Vector2.left : Vector2.right;
+
+                // Si toPlayer está "delante", dot será alto. Si está detrás, dot será negativo.
+                Vector2 dirToPlayer = (dist > 0.0001f) ? (toPlayer / dist) : enemyForward;
+                float dot = Vector2.Dot(enemyForward, dirToPlayer);
+
+                if (dot < frontDotThreshold)
+                {
+                    hasLineOfSight = false;
+                    return;
+                }
+            }
+
             // (Opcional) precheck por layer para evitar raycasts
             if (playerLayer.value != 0)
             {
-                var hit = Physics2D.OverlapCircle(enemyCenter, viewDistance, playerLayer);
+                var hit = Physics2D.OverlapCircle(enemyCenter, effectiveViewDistance, playerLayer);
                 if (hit == null)
                 {
                     hasLineOfSight = false;
@@ -104,8 +147,7 @@ namespace Game.Enemies
                 }
             }
 
-            hasLineOfSight = dist <= viewDistance;
-
+            hasLineOfSight = dist <= effectiveViewDistance;
             if (hasLineOfSight)
             {
                 lastSeenTime = Time.time;
@@ -113,10 +155,6 @@ namespace Game.Enemies
             }
         }
 
-        /// <summary>
-        /// ✅ Rango de ataque por caja X/Y usando centros de colliders.
-        /// Esto arregla el caso "player encima" (Y) aunque los pivots estén en los pies.
-        /// </summary>
         public bool IsPlayerInAttackRange(Vector2 origin)
         {
             ResolvePlayer();
@@ -124,8 +162,8 @@ namespace Game.Enemies
 
             Vector2 enemyCenter = GetCenter(gameObject, origin);
             Vector2 playerCenter = GetCenter(player.gameObject, (Vector2)player.position);
-
             Vector2 d = playerCenter - enemyCenter;
+
             return Mathf.Abs(d.x) <= attackRangeX && Mathf.Abs(d.y) <= attackRangeY;
         }
 
@@ -139,6 +177,19 @@ namespace Game.Enemies
             return Vector2.Distance(enemyCenter, playerCenter);
         }
 
+        private bool IsPlayerStealthed()
+        {
+            // cache lazy si se ha asignado player por inspector
+            if (player != null && cachedPlayerController == null)
+            {
+                cachedPlayerController = player.GetComponent<Game.Player.PlayerController>()
+                                      ?? player.GetComponentInChildren<Game.Player.PlayerController>(true);
+            }
+
+            if (cachedPlayerController == null) return false;
+            return cachedPlayerController.IsCrouching || cachedPlayerController.IsLayDown;
+        }
+
         private static Vector2 GetCenter(GameObject go, Vector2 fallback)
         {
             var col = go.GetComponent<Collider2D>() ?? go.GetComponentInChildren<Collider2D>(true);
@@ -150,19 +201,16 @@ namespace Game.Enemies
         {
             if (!debugGizmos) return;
 
-            // Vision
             Gizmos.color = Color.yellow;
             Gizmos.DrawWireSphere(transform.position, viewDistance);
 
             Gizmos.color = Color.gray;
             Gizmos.DrawWireSphere(transform.position, viewDistance * loseDistanceMultiplier);
 
-            // Attack box (en el centro del enemy)
             Gizmos.color = new Color(1f, 0.5f, 0f, 1f);
             Vector3 p = transform.position;
             Gizmos.DrawWireCube(p, new Vector3(attackRangeX * 2f, attackRangeY * 2f, 0f));
 
-            // Last known
             Gizmos.color = Color.magenta;
             Gizmos.DrawWireSphere(lastKnownPlayerPos, 0.12f);
         }
