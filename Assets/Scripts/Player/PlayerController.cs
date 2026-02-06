@@ -126,6 +126,7 @@ namespace Game.Player
 
         private Coroutine hitStopCo;
 
+
         public bool FacingLeft => facingDir < 0;
         public bool IsGrounded => isGrounded;
         public bool IsAttacking => isAttacking;
