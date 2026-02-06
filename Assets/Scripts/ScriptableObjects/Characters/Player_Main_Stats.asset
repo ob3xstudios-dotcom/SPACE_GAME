@@ -1,0 +1,39 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 5293a75860d329145a8b39dd553025f6, type: 3}
+  m_Name: Player_Main_Stats
+  m_EditorClassIdentifier: 
+  maxRunSpeed: 7
+  groundAcceleration: 90
+  groundDeceleration: 110
+  airAcceleration: 55
+  airDeceleration: 35
+  turnAccelerationMultiplier: 1.35
+  jumpForce: 12
+  gravityScale: 1
+  fallGravityMultiplier: 2.2
+  apexGravityMultiplier: 0.9
+  apexThreshold: 1
+  jumpCutMultiplier: 0.5
+  maxFallSpeed: -25
+  coyoteTime: 0.1
+  jumpBufferTime: 0.05
+  hasDash: 1
+  dashSpeed: 18
+  dashDuration: 0.12
+  dashCooldown: 0.25
+  allowAirDash: 1
+  airDashesMax: 1
+  wallSlideSpeed: -2
+  wallJumpForceX: 6
+  wallJumpForceY: 7
+  wallJumpLockTime: 0.15

@@ -1,0 +1,22 @@
+############################
+# Unity generated folders
+############################
+[Ll]ibrary/
+[Tt]emp/
+[Oo]bj/
+[Bb]uild/
+[Bb]uilds/
+[Ll]ogs/
+UserSettings/
+MemoryCaptures/
+Recordings/
+
+############################
+# Unity cache & artifacts
+############################
+Library/PackageCache/
+Library/ArtifactDB*
+Library/Artifacts/
+Library/Bee/
+Library/ScriptAssemblies/
+Libra

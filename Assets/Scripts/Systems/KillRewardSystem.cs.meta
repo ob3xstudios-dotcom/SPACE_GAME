@@ -1,0 +1,13 @@
+fileFormatVersion: 2
+guid: 2bc21e611dace8142960aee453efadf1
+MonoImporter:
+  externalObjects: {}
+  serializedVersion: 2
+  defaultReferences:
+  - enemyKilledChannel: {fileID: 11400000, guid: 7c22a0061186ade4d805371e91d4adec, type: 2}
+  - playerResources: {instanceID: 0}
+  executionOrder: 0
+  icon: {instanceID: 0}
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
