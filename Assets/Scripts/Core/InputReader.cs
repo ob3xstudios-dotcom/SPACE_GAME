@@ -7,31 +7,26 @@ namespace Game.Input
     {
         public Vector2 MoveInput { get; private set; }
 
-        // Latched (hasta consumir)
-        public bool JumpPressed { get; private set; }
-        public bool DashPressed { get; private set; }
-        public bool AttackPressed { get; private set; }
-        public bool ParryPressed { get; private set; }
-
-        // Held (estado “real”)
         public bool JumpHeld { get; private set; }
-        public bool CrouchHeld { get; private set; }
+        public bool IsCrouching { get; private set; }
+        public bool IsLayDown { get; private set; }
 
-        // Toggle states (modo)
-        public bool IsCrouching { get; private set; }   // toggle por pulsación
-        public bool IsLayDown { get; private set; }     // se activa por mantener
+        private bool jumpPressed;
+        private bool attackPressed;
+        private bool dashPressed;
+        private bool parryPressed;
 
-        [Header("Crouch -> LayDown")]
-        [Tooltip("Segundos manteniendo el botón Crouch para pasar a LayDown.")]
-        [SerializeField, Range(0.2f, 5f)] private float holdToLayDownSeconds = 2f;
+        [Header("Crouch / LayDown")]
+        [SerializeField, Range(0.2f, 5f)] private float holdSecondsForLayDown = 2f;
 
         [Header("Debug")]
-        [SerializeField] private bool debugInput = false;
+        [SerializeField] private bool debugInput = true;
 
         private PlayerInputActions actions;
 
+        private bool crouchHeld;
         private float crouchHoldTimer;
-        private bool crouchWasHeld;
+        private bool layDownTriggeredThisHold;
 
         private void Awake()
         {
@@ -40,28 +35,32 @@ namespace Game.Input
 
         private void OnEnable()
         {
-            if (actions == null) actions = new PlayerInputActions();
+            if (actions == null)
+                actions = new PlayerInputActions();
+
             actions.Enable();
             actions.Gameplay.Enable();
 
-            // MOVE
             actions.Gameplay.Move.performed += OnMovePerformed;
             actions.Gameplay.Move.canceled += OnMoveCanceled;
 
-            // JUMP
             actions.Gameplay.Jump.started += OnJumpStarted;
-            actions.Gameplay.Jump.performed += OnJumpPerformed;
             actions.Gameplay.Jump.canceled += OnJumpCanceled;
 
-            // DASH / ATTACK / PARRY
-            actions.Gameplay.Dash.performed += OnDashPerformed;
-            actions.Gameplay.Attack.performed += OnAttackPerformed;
+            actions.Gameplay.Attack.started += OnAttackStarted;
+            actions.Gameplay.Dash.started += OnDashStarted;
+
+            actions.Gameplay.Parry.started += OnParryStarted;
             actions.Gameplay.Parry.performed += OnParryPerformed;
 
-            // CROUCH (Press para toggle; pero también usamos IsPressed() en Update para el hold real)
-            actions.Gameplay.Crouch.performed += OnCrouchPerformed;
+            actions.Gameplay.Crouch.started += OnCrouchStarted;
+            actions.Gameplay.Crouch.canceled += OnCrouchCanceled;
 
-            if (debugInput) Debug.Log("[INPUT] InputReader ENABLED");
+            if (debugInput)
+            {
+                Debug.Log("[INPUT] ENABLED");
+                Debug.Log($"[INPUT] Parry enabled={actions.Gameplay.Parry.enabled} bindings={actions.Gameplay.Parry.bindings.Count}");
+            }
         }
 
         private void OnDisable()
@@ -72,19 +71,21 @@ namespace Game.Input
             actions.Gameplay.Move.canceled -= OnMoveCanceled;
 
             actions.Gameplay.Jump.started -= OnJumpStarted;
-            actions.Gameplay.Jump.performed -= OnJumpPerformed;
             actions.Gameplay.Jump.canceled -= OnJumpCanceled;
 
-            actions.Gameplay.Dash.performed -= OnDashPerformed;
-            actions.Gameplay.Attack.performed -= OnAttackPerformed;
+            actions.Gameplay.Attack.started -= OnAttackStarted;
+            actions.Gameplay.Dash.started -= OnDashStarted;
+
+            actions.Gameplay.Parry.started -= OnParryStarted;
             actions.Gameplay.Parry.performed -= OnParryPerformed;
 
-            actions.Gameplay.Crouch.performed -= OnCrouchPerformed;
+            actions.Gameplay.Crouch.started -= OnCrouchStarted;
+            actions.Gameplay.Crouch.canceled -= OnCrouchCanceled;
 
             actions.Gameplay.Disable();
             actions.Disable();
 
-            if (debugInput) Debug.Log("[INPUT] InputReader DISABLED");
+            if (debugInput) Debug.Log("[INPUT] DISABLED");
         }
 
         private void OnDestroy()
@@ -94,130 +95,149 @@ namespace Game.Input
 
         private void Update()
         {
-            // ✅ Held real (aunque el action tenga Interaction Press)
-            // OJO: actions.Gameplay es struct => NO se compara con null
-            bool crouchDown = actions != null && actions.Gameplay.Crouch != null && actions.Gameplay.Crouch.IsPressed();
-            CrouchHeld = crouchDown;
-
-            // Detectar inicio de hold
-            if (crouchDown && !crouchWasHeld)
-                crouchHoldTimer = 0f;
-
-            // Contar hold
-            if (crouchDown)
+            // FALLBACK DIRECTO: si los callbacks no llegan, esto debería detectarlo.
+            if (actions != null && actions.Gameplay.Parry.WasPressedThisFrame())
             {
-                crouchHoldTimer += Time.deltaTime;
-
-                // ✅ Si ya estás crouch y mantienes X segundos -> LayDown
-                if (IsCrouching && !IsLayDown && crouchHoldTimer >= holdToLayDownSeconds)
-                {
-                    IsLayDown = true;
-                    if (debugInput) Debug.Log("[INPUT] LayDown ACTIVATED (hold)");
-                }
+                parryPressed = true;
+                Debug.Log("[INPUT] PARRY WasPressedThisFrame");
             }
 
-            crouchWasHeld = crouchDown;
+            if (!crouchHeld)
+            {
+                crouchHoldTimer = 0f;
+                layDownTriggeredThisHold = false;
+                return;
+            }
+
+            crouchHoldTimer += Time.deltaTime;
+
+            if (!layDownTriggeredThisHold && crouchHoldTimer >= holdSecondsForLayDown)
+            {
+                IsLayDown = true;
+                IsCrouching = false;
+                layDownTriggeredThisHold = true;
+
+                if (debugInput) Debug.Log("[INPUT] LAYDOWN ON");
+            }
         }
 
-        // ----------------------------
-        // CONSUME
-        // ----------------------------
         public bool ConsumeJumpPressed()
         {
-            if (!JumpPressed) return false;
-            JumpPressed = false;
-            return true;
-        }
-
-        public bool ConsumeDashPressed()
-        {
-            if (!DashPressed) return false;
-            DashPressed = false;
+            if (!jumpPressed) return false;
+            jumpPressed = false;
             return true;
         }
 
         public bool ConsumeAttackPressed()
         {
-            if (!AttackPressed) return false;
-            AttackPressed = false;
+            if (!attackPressed) return false;
+            attackPressed = false;
+            return true;
+        }
+
+        public bool ConsumeDashPressed()
+        {
+            if (!dashPressed) return false;
+            dashPressed = false;
             return true;
         }
 
         public bool ConsumeParryPressed()
         {
-            if (!ParryPressed) return false;
-            ParryPressed = false;
+            if (!parryPressed) return false;
+            parryPressed = false;
             return true;
         }
 
-        // ----------------------------
-        // CALLBACKS
-        // ----------------------------
+        public void ForceStandUp()
+        {
+            IsCrouching = false;
+            IsLayDown = false;
+            crouchHeld = false;
+            crouchHoldTimer = 0f;
+            layDownTriggeredThisHold = false;
+
+            if (debugInput) Debug.Log("[INPUT] FORCE STAND UP");
+        }
+
         private void OnMovePerformed(InputAction.CallbackContext ctx)
         {
             MoveInput = ctx.ReadValue<Vector2>();
-            if (debugInput) Debug.Log($"[INPUT] MOVE {MoveInput}");
         }
 
         private void OnMoveCanceled(InputAction.CallbackContext ctx)
         {
             MoveInput = Vector2.zero;
-            if (debugInput) Debug.Log("[INPUT] MOVE canceled");
         }
 
         private void OnJumpStarted(InputAction.CallbackContext ctx)
         {
+            jumpPressed = true;
             JumpHeld = true;
+
             if (debugInput) Debug.Log("[INPUT] JUMP started");
         }
 
         private void OnJumpCanceled(InputAction.CallbackContext ctx)
         {
             JumpHeld = false;
-            if (debugInput) Debug.Log("[INPUT] JUMP canceled");
         }
 
-        private void OnJumpPerformed(InputAction.CallbackContext ctx)
+        private void OnAttackStarted(InputAction.CallbackContext ctx)
         {
-            JumpPressed = true;
-            if (debugInput) Debug.Log("[INPUT] JUMP performed");
+            attackPressed = true;
+
+            if (debugInput) Debug.Log("[INPUT] ATTACK started");
         }
 
-        private void OnDashPerformed(InputAction.CallbackContext ctx)
+        private void OnDashStarted(InputAction.CallbackContext ctx)
         {
-            DashPressed = true;
-            if (debugInput) Debug.Log("[INPUT] DASH performed");
+            dashPressed = true;
+
+            if (debugInput) Debug.Log("[INPUT] DASH started");
         }
 
-        private void OnAttackPerformed(InputAction.CallbackContext ctx)
+        private void OnParryStarted(InputAction.CallbackContext ctx)
         {
-            AttackPressed = true;
-            if (debugInput) Debug.Log("[INPUT] ATTACK performed");
+            parryPressed = true;
+            Debug.Log("[INPUT] PARRY started");
         }
 
         private void OnParryPerformed(InputAction.CallbackContext ctx)
         {
-            ParryPressed = true;
-            if (debugInput) Debug.Log("[INPUT] PARRY performed");
+            parryPressed = true;
+            Debug.Log("[INPUT] PARRY performed");
         }
 
-        private void OnCrouchPerformed(InputAction.CallbackContext ctx)
+        private void OnCrouchStarted(InputAction.CallbackContext ctx)
         {
-            // Toggle:
-            // - Si estás en crouch o laydown => vuelves a STAND
-            // - Si estás de pie => entras en CROUCH
-            if (IsCrouching || IsLayDown)
+            crouchHeld = true;
+            crouchHoldTimer = 0f;
+            layDownTriggeredThisHold = false;
+
+            if (IsLayDown)
+            {
+                IsLayDown = false;
+                IsCrouching = true;
+            }
+            else if (IsCrouching)
             {
                 IsCrouching = false;
-                IsLayDown = false;
-                if (debugInput) Debug.Log("[INPUT] CROUCH OFF (stand)");
             }
             else
             {
                 IsCrouching = true;
-                IsLayDown = false;
-                if (debugInput) Debug.Log("[INPUT] CROUCH ON");
             }
+
+            if (debugInput)
+                Debug.Log($"[INPUT] CROUCH toggle | crouch={IsCrouching} layDown={IsLayDown}");
+        }
+
+        private void OnCrouchCanceled(InputAction.CallbackContext ctx)
+        {
+            crouchHeld = false;
+            crouchHoldTimer = 0f;
+            layDownTriggeredThisHold = false;
         }
     }
 }

@@ -4,19 +4,18 @@ namespace Game.Enemies.States
 {
     public class EnemyHitState : Game.Enemies.IEnemyState
     {
-        private float stunTime = 0.18f;
-        private float t;
+        private float timer = 0.2f;
 
         public void Enter(EnemyBase enemy)
         {
-            t = stunTime;
             enemy.StopSmooth(60f);
         }
 
         public void Tick(EnemyBase enemy)
         {
-            t -= Time.deltaTime;
-            if (t > 0f) return;
+            timer -= Time.deltaTime;
+
+            if (timer > 0f) return;
 
             if (enemy.CanSeePlayer() || enemy.HasTargetInMemory)
                 enemy.SetState(new EnemyChaseState());

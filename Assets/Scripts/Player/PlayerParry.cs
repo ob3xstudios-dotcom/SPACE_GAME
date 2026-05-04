@@ -1,4 +1,5 @@
-﻿using UnityEngine;
+﻿using System.Collections;
+using UnityEngine;
 
 namespace Game.Player
 {
@@ -9,32 +10,40 @@ namespace Game.Player
         [SerializeField] private Game.Input.InputReader input;
         [SerializeField] private PlayerAnimatorDriver animDriver;
         [SerializeField] private PlayerMana mana;
+        [SerializeField] private PlayerProgress progress;
 
-        [Header("Skill gate")]
-        [SerializeField] private bool hasParry = true;
-        [SerializeField] private bool hasParryDagger = false; // ← item futuro
-
-        [Header("Parry Tuning")]
-        [SerializeField, Range(0.05f, 0.25f)] private float parryWindow = 0.12f;
+        [Header("Parry Base")]
+        [SerializeField] private bool parryUnlocked = true;
+        [SerializeField, Range(0.05f, 0.35f)] private float parryWindow = 0.14f;
         [SerializeField, Range(0.1f, 1.2f)] private float parryCooldown = 0.45f;
         [SerializeField, Range(0f, 0.5f)] private float failRecovery = 0.18f;
-
-        [Header("Dagger Upgrade")]
-        [SerializeField] private int daggerManaCost = 1;
-        [SerializeField] private float daggerStunSeconds = 1.2f;
+        [SerializeField, Range(0f, 0.5f)] private float movementLockSeconds = 0.22f;
 
         [Header("Hitbox")]
-        [SerializeField] private float radius = 0.55f;
-        [SerializeField] private float forwardOffset = 0.65f;
+        [SerializeField] private float radius = 0.65f;
+        [SerializeField] private float forwardOffset = 0.7f;
         [SerializeField] private LayerMask enemyLayer;
 
-        [Header("Enemy push")]
-        [SerializeField] private float pushSpeed = 8.5f;
+        [Header("Enemy Push")]
+        [SerializeField] private float pushSpeed = 9f;
         [SerializeField] private float pushLockSeconds = 0.18f;
 
-        private float windowT;
+        [Header("Perfect Parry Feel")]
+        [SerializeField, Range(0f, 0.15f)] private float successHitStop = 0.06f;
+        [SerializeField, Range(0f, 0.15f)] private float failHitStop = 0.00f;
+
+        [Header("Dagger Upgrade")]
+        [SerializeField] private bool useDaggerUpgrade = true;
+        [SerializeField, Min(0)] private int stunManaCost = 1;
+        [SerializeField, Range(0f, 3f)] private float stunSeconds = 0.65f;
+
+        [Header("Debug")]
+        [SerializeField] private bool debugLogs = true;
+
         private float cdT;
+        private float windowT;
         private float failT;
+        private Coroutine hitStopCo;
 
         private void Awake()
         {
@@ -42,6 +51,7 @@ namespace Game.Player
             if (input == null) input = GetComponent<Game.Input.InputReader>();
             if (animDriver == null) animDriver = GetComponent<PlayerAnimatorDriver>();
             if (mana == null) mana = GetComponent<PlayerMana>();
+            if (progress == null) progress = GetComponent<PlayerProgress>();
         }
 
         private void Update()
@@ -50,22 +60,51 @@ namespace Game.Player
             windowT -= Time.deltaTime;
             failT -= Time.deltaTime;
 
-            if (failT > 0f) return;
-            if (!hasParry) return;
+            if (!parryUnlocked) return;
+            if (input == null) return;
 
-            if (input != null && input.ConsumeParryPressed())
+            if (!input.ConsumeParryPressed()) return;
+
+            if (debugLogs)
+                Debug.Log("[PARRY] BUTTON PRESSED");
+
+            if (failT > 0f)
             {
-                if (cdT > 0f) return;
+                if (debugLogs) Debug.Log($"[PARRY] blocked by fail recovery: {failT:0.00}s");
+                return;
+            }
 
-                windowT = parryWindow;
-                cdT = parryCooldown;
+            if (cdT > 0f)
+            {
+                if (debugLogs) Debug.Log($"[PARRY] blocked by cooldown: {cdT:0.00}s");
+                return;
+            }
 
-                animDriver?.TriggerParry();
+            StartParry();
+        }
 
-                bool success = TryParryHit();
+        private void StartParry()
+        {
+            if (debugLogs)
+                Debug.Log("[PARRY] START");
 
-                if (!success)
-                    failT = failRecovery;
+            cdT = parryCooldown;
+            windowT = parryWindow;
+
+            animDriver?.TriggerParry();
+            controller?.LockMovement(movementLockSeconds);
+
+            bool success = TryParryHit();
+
+            if (debugLogs)
+                Debug.Log($"[PARRY] success={success}");
+
+            if (!success)
+            {
+                failT = failRecovery;
+
+                if (failHitStop > 0f)
+                    StartHitStop(failHitStop);
             }
         }
 
@@ -73,37 +112,126 @@ namespace Game.Player
         {
             Vector2 origin = transform.position;
             Vector2 dir = controller != null && controller.FacingLeft ? Vector2.left : Vector2.right;
-            Vector2 p = origin + dir * forwardOffset;
+            Vector2 hitPos = origin + dir * forwardOffset;
 
-            var hits = Physics2D.OverlapCircleAll(p, radius, enemyLayer);
-            if (hits == null || hits.Length == 0) return false;
+            if (debugLogs)
+                Debug.Log($"[PARRY] checking enemies at={hitPos} radius={radius} mask={enemyLayer.value}");
 
-            foreach (var col in hits)
+            Collider2D[] hits = Physics2D.OverlapCircleAll(hitPos, radius, enemyLayer);
+
+            if (hits == null || hits.Length == 0)
             {
+                if (debugLogs) Debug.Log("[PARRY] no enemies in hitbox");
+                return false;
+            }
+
+            for (int i = 0; i < hits.Length; i++)
+            {
+                Collider2D col = hits[i];
                 if (col == null) continue;
 
                 var enemy = col.GetComponentInParent<Game.Enemies.EnemyBase>();
-                if (enemy == null) continue;
+                if (enemy == null)
+                {
+                    if (debugLogs) Debug.Log($"[PARRY] collider {col.name} has no EnemyBase");
+                    continue;
+                }
+
+                if (debugLogs)
+                    Debug.Log($"[PARRY] enemy found: {enemy.name} | IsParryable={enemy.IsParryable}");
 
                 if (!enemy.IsParryable) continue;
 
-                Game.Enemies.States.EnemyAttackState.TryParryEnemy(enemy);
+                bool parried = Game.Enemies.States.EnemyAttackState.TryParryEnemy(enemy);
+                if (!parried)
+                {
+                    if (debugLogs) Debug.Log($"[PARRY] TryParryEnemy failed on {enemy.name}");
+                    continue;
+                }
 
-                Vector2 pushDir = ((Vector2)enemy.transform.position - origin);
-                if (pushDir.sqrMagnitude < 0.0001f) pushDir = dir;
+                Vector2 pushDir = (Vector2)enemy.transform.position - origin;
+                if (pushDir.sqrMagnitude < 0.0001f)
+                    pushDir = dir;
 
                 enemy.ApplyParryPush(pushDir, pushSpeed, pushLockSeconds);
+                TryApplyDaggerStun(enemy);
 
-                // ✅ Dagger upgrade check
-                if (hasParryDagger && mana != null && mana.ConsumeMana(daggerManaCost))
-                {
-                    enemy.ApplyParryStun(daggerStunSeconds);
-                }
+                if (successHitStop > 0f)
+                    StartHitStop(successHitStop);
+
+                if (debugLogs)
+                    Debug.Log($"[PARRY] SUCCESS on {enemy.name}");
 
                 return true;
             }
 
+            if (debugLogs)
+                Debug.Log("[PARRY] enemies found, but none were parryable");
+
             return false;
         }
+
+        private void TryApplyDaggerStun(Game.Enemies.EnemyBase enemy)
+        {
+            if (!useDaggerUpgrade) return;
+            if (enemy == null) return;
+
+            bool hasDagger = progress != null && progress.HasDagger;
+            if (!hasDagger)
+            {
+                if (debugLogs) Debug.Log("[PARRY] no dagger: stun skipped");
+                return;
+            }
+
+            int cost = progress != null ? progress.ParryStunManaCost : stunManaCost;
+            float stun = progress != null ? progress.ParryStunSeconds : stunSeconds;
+
+            if (mana == null)
+            {
+                if (debugLogs) Debug.Log("[PARRY] no mana component: stun skipped");
+                return;
+            }
+
+            if (!mana.ConsumeMana(cost))
+            {
+                if (debugLogs) Debug.Log("[PARRY] not enough mana: stun skipped");
+                return;
+            }
+
+            enemy.SetState(new Game.Enemies.States.EnemyStunnedState(stun));
+
+            if (debugLogs)
+                Debug.Log($"[PARRY] dagger stun applied: {stun:0.00}s");
+        }
+
+        private void StartHitStop(float seconds)
+        {
+            if (hitStopCo != null) StopCoroutine(hitStopCo);
+            hitStopCo = StartCoroutine(HitStopRoutine(seconds));
+        }
+
+        private static IEnumerator HitStopRoutine(float seconds)
+        {
+            float prev = Time.timeScale;
+            Time.timeScale = 0f;
+            yield return new WaitForSecondsRealtime(seconds);
+            Time.timeScale = prev <= 0f ? 1f : prev;
+        }
+
+#if UNITY_EDITOR
+        private void OnDrawGizmosSelected()
+        {
+            Vector2 origin = transform.position;
+            Vector2 dir = Vector2.right;
+
+            if (controller != null && controller.FacingLeft)
+                dir = Vector2.left;
+
+            Vector2 hitPos = origin + dir * forwardOffset;
+
+            Gizmos.color = Color.cyan;
+            Gizmos.DrawWireSphere(hitPos, radius);
+        }
+#endif
     }
 }
