@@ -1,65 +1,85 @@
-﻿using System.Collections;
+using System.Collections;
+using Game.Player;
 using UnityEngine;
 using UnityEngine.UI;
-using Game.Player;
 
 namespace Game.UI
 {
     public class HealthMasksUI : MonoBehaviour
     {
+        [Header("Refs")]
         [SerializeField] private PlayerResources playerResources;
-        [SerializeField] private Image maskPrefab;
-        [SerializeField] private Transform container;
+
+        [Header("UI")]
+        [SerializeField] private Image targetImage;
         [SerializeField] private Sprite fullSprite;
+        [SerializeField] private Sprite halfSprite;
         [SerializeField] private Sprite emptySprite;
 
-        private Image[] masks = new Image[0];
+        [Header("Debug")]
+        [SerializeField] private bool debugLogs = false;
+
+        private Coroutine bindRoutine;
+
+        private void Awake()
+        {
+            if (targetImage == null)
+                targetImage = GetComponent<Image>();
+        }
 
         private void OnEnable()
         {
-            StartCoroutine(BindWhenReady());
+            bindRoutine = StartCoroutine(BindWhenReady());
         }
 
         private IEnumerator BindWhenReady()
         {
             if (playerResources == null)
-                playerResources = FindObjectOfType<PlayerResources>();
+                playerResources = FindFirstObjectByType<PlayerResources>();
 
-            // ✅ esperar hasta que exista Health (Awake ya corrió)
             while (playerResources != null && playerResources.Health == null)
                 yield return null;
 
             if (playerResources == null || playerResources.Health == null)
             {
                 Debug.LogError("[UI] HealthMasksUI: no PlayerResources/Health");
+                bindRoutine = null;
                 yield break;
             }
 
             playerResources.Health.OnChanged += Refresh;
             Refresh(playerResources.Health.Current, playerResources.Health.Max);
+            bindRoutine = null;
         }
 
         private void OnDisable()
         {
+            if (bindRoutine != null)
+            {
+                StopCoroutine(bindRoutine);
+                bindRoutine = null;
+            }
+
             if (playerResources != null && playerResources.Health != null)
                 playerResources.Health.OnChanged -= Refresh;
         }
 
         private void Refresh(int current, int max)
         {
-            EnsureMaskCount(max);
-            for (int i = 0; i < masks.Length; i++)
-                masks[i].sprite = (i < current) ? fullSprite : emptySprite;
-        }
+            if (debugLogs)
+                Debug.Log($"[UI] HealthMasksUI Refresh {current}/{max}");
 
-        private void EnsureMaskCount(int max)
-        {
-            for (int i = container.childCount - 1; i >= 0; i--)
-                Destroy(container.GetChild(i).gameObject);
+            if (targetImage == null) return;
 
-            masks = new Image[max];
-            for (int i = 0; i < max; i++)
-                masks[i] = Instantiate(maskPrefab, container);
+            max = Mathf.Max(0, max);
+            current = Mathf.Clamp(current, 0, max);
+
+            if (current >= max && max > 0)
+                targetImage.sprite = fullSprite;
+            else if (current > 0)
+                targetImage.sprite = halfSprite;
+            else
+                targetImage.sprite = emptySprite;
         }
     }
 }

@@ -11,14 +11,15 @@ namespace Game.Enemies
         [Header("Vision")]
         [SerializeField, Range(0.5f, 50f)] private float viewDistance = 6f;
         [SerializeField, Range(1.0f, 3f)] private float loseDistanceMultiplier = 1.25f;
-        [SerializeField, Range(0f, 10f)] private float memoryTime = 2.0f;
         [SerializeField] private LayerMask playerLayer;
         [SerializeField] private LayerMask obstacleLayer;
 
         [Header("Stealth Vision")]
-        [SerializeField] private bool requireFacingOnlyWhenPlayerStealthed = true;
-        [SerializeField, Range(-1f, 1f)] private float frontDotThreshold = 0.25f;
         [SerializeField, Range(0.1f, 1f)] private float stealthViewDistanceMultiplier = 1.0f;
+
+        [Header("Hearing")]
+        [SerializeField, Range(0.5f, 30f)] private float hearingDistance = 5f;
+        [SerializeField, Min(0f)] private float hearingSpeedThreshold = 6f;
 
         [Header("Attack Range")]
         [SerializeField, Range(0.05f, 10f)] private float attackRangeX = 1.1f;
@@ -29,6 +30,8 @@ namespace Game.Enemies
 
         private EnemyBase enemy;
         private Game.Player.PlayerController cachedPlayerController;
+        private Rigidbody2D cachedPlayerRb;
+        private const float VisionRayEpsilon = 0.02f;
 
         private bool hasLineOfSight;
         private float lastSeenTime = -999f;
@@ -38,7 +41,6 @@ namespace Game.Enemies
         public float ViewDistance => viewDistance;
         public float LoseDistance => viewDistance * loseDistanceMultiplier;
         public bool HasLineOfSight => hasLineOfSight;
-        public bool HasTargetInMemory => hasLineOfSight || (Time.time - lastSeenTime) <= memoryTime;
         public Vector2 LastKnownPlayerPos => lastKnownPlayerPos;
         public float AttackRangeX => attackRangeX;
         public float AttackRangeY => attackRangeY;
@@ -62,6 +64,13 @@ namespace Game.Enemies
                     player.GetComponent<Game.Player.PlayerController>() ??
                     player.GetComponentInChildren<Game.Player.PlayerController>(true);
             }
+
+            if (player != null && cachedPlayerRb == null)
+            {
+                cachedPlayerRb =
+                    player.GetComponent<Rigidbody2D>() ??
+                    player.GetComponentInChildren<Rigidbody2D>(true);
+            }
         }
 
         public void TickVision(Vector2 origin)
@@ -74,62 +83,90 @@ namespace Game.Enemies
                 return;
             }
 
-            Vector2 enemyCenter = GetCenter(gameObject, origin);
-            Vector2 playerCenter = GetCenter(player.gameObject, (Vector2)player.position);
-            Vector2 toPlayer = playerCenter - enemyCenter;
-            float dist = toPlayer.magnitude;
-
-            bool playerStealthed = IsPlayerStealthed();
-
-            float effectiveViewDistance = viewDistance * (playerStealthed ? stealthViewDistanceMultiplier : 1f);
-            float effectiveLoseDistance = effectiveViewDistance * loseDistanceMultiplier;
-
-            if (dist > effectiveLoseDistance)
+            if (!IsPlayerOnLayer())
             {
                 hasLineOfSight = false;
                 return;
             }
 
-            if (requireFacingOnlyWhenPlayerStealthed && playerStealthed)
-            {
-                Vector2 forward = enemy != null ? enemy.Forward : Vector2.right;
-                Vector2 dirToPlayer = dist > 0.0001f ? toPlayer / dist : forward;
+            Vector2 enemyCenter = GetCenter(gameObject, origin);
+            Vector2 playerCenter = GetCenter(player.gameObject, (Vector2)player.position);
+            Vector2 toPlayer = playerCenter - enemyCenter;
+            float dist = toPlayer.magnitude;
 
-                float dot = Vector2.Dot(forward, dirToPlayer);
-                if (dot < frontDotThreshold)
-                {
-                    hasLineOfSight = false;
-                    return;
-                }
-            }
+            bool canSee = CanSeePlayerByVision(enemyCenter, toPlayer, dist);
+            bool canHear = CanHearPlayer(enemyCenter, toPlayer, dist);
 
-            if (playerLayer.value != 0)
-            {
-                var hit = Physics2D.OverlapCircle(enemyCenter, effectiveViewDistance, playerLayer);
-                if (hit == null)
-                {
-                    hasLineOfSight = false;
-                    return;
-                }
-            }
-
-            if (obstacleLayer.value != 0 && dist > 0.001f)
-            {
-                var block = Physics2D.Raycast(enemyCenter, toPlayer.normalized, dist, obstacleLayer);
-                if (block.collider != null)
-                {
-                    hasLineOfSight = false;
-                    return;
-                }
-            }
-
-            hasLineOfSight = dist <= effectiveViewDistance;
+            hasLineOfSight = canSee || canHear;
 
             if (hasLineOfSight)
             {
                 lastSeenTime = Time.time;
                 lastKnownPlayerPos = playerCenter;
             }
+        }
+
+        private bool CanSeePlayerByVision(Vector2 enemyCenter, Vector2 toPlayer, float dist)
+        {
+            bool playerStealthed = IsPlayerStealthed();
+            float effectiveViewDistance = viewDistance * (playerStealthed ? stealthViewDistanceMultiplier : 1f);
+
+            if (dist > effectiveViewDistance)
+                return false;
+
+            if (dist <= 0.001f)
+                return true;
+
+            Vector2 forward = enemy != null ? enemy.Forward : Vector2.right;
+            Vector2 dirToPlayer = toPlayer / dist;
+
+            if (Vector2.Dot(forward, dirToPlayer) <= 0f)
+                return false;
+
+            return !IsBlockedByObstacle(enemyCenter, dirToPlayer, dist);
+        }
+
+        private bool CanHearPlayer(Vector2 enemyCenter, Vector2 toPlayer, float dist)
+        {
+            if (IsPlayerStealthed()) return false;
+            if (cachedPlayerRb == null) return false;
+            if (dist > hearingDistance) return false;
+            if (cachedPlayerRb.velocity.magnitude < hearingSpeedThreshold) return false;
+            if (dist <= 0.001f) return true;
+
+            Vector2 dirToPlayer = toPlayer / dist;
+            return !IsBlockedByObstacle(enemyCenter, dirToPlayer, dist);
+        }
+
+        private bool IsBlockedByObstacle(Vector2 origin, Vector2 dir, float dist)
+        {
+            int mask = ObstacleMask();
+            if (mask == 0) return false;
+
+            RaycastHit2D block = Physics2D.Raycast(origin, dir, dist - VisionRayEpsilon, mask);
+            return block.collider != null && !IsPlayerCollider(block.collider);
+        }
+
+        private bool IsPlayerOnLayer()
+        {
+            int mask = PlayerMask();
+            return mask == 0 || (mask & (1 << player.gameObject.layer)) != 0;
+        }
+
+        private int PlayerMask()
+        {
+            if (playerLayer.value != 0)
+                return playerLayer.value;
+
+            return LayerMask.GetMask("Player");
+        }
+
+        private int ObstacleMask()
+        {
+            if (obstacleLayer.value != 0)
+                return obstacleLayer.value;
+
+            return LayerMask.GetMask("Ground", "Wall");
         }
 
         public bool IsPlayerInAttackRange(Vector2 origin)
@@ -158,6 +195,12 @@ namespace Game.Enemies
         {
             if (cachedPlayerController == null) return false;
             return cachedPlayerController.IsCrouching || cachedPlayerController.IsLayDown;
+        }
+
+        private bool IsPlayerCollider(Collider2D col)
+        {
+            if (col == null || player == null) return false;
+            return col.transform == player || col.transform.IsChildOf(player);
         }
 
         private static Vector2 GetCenter(GameObject go, Vector2 fallback)

@@ -9,6 +9,7 @@ namespace Game.Systems
         [SerializeField] private EnemyKilledEventChannelSO enemyKilledChannel;
         [SerializeField] private PlayerResources playerResources;
         [SerializeField, Min(0)] private int manaPerKill = 1;
+        [SerializeField, Min(0)] private int staminaPerKill = 1;
 
         private void OnEnable()
         {
@@ -26,6 +27,7 @@ namespace Game.Systems
         {
             if (playerResources == null) return;
             playerResources.GainMana(manaPerKill);
+            playerResources.RestoreStamina(staminaPerKill);
         }
     }
 }

@@ -1,6 +1,7 @@
 ﻿using System.Collections;
 using UnityEngine;
 using Game.Enemies.Combat;
+using Game.Systems;
 
 namespace Game.Enemies
 {
@@ -14,7 +15,7 @@ namespace Game.Enemies
         [Header("Animator Params")]
         [SerializeField] private string attackTrigger = "Attack";
         [SerializeField] private string attackDirInt = "AttackDir"; // 0 side, 1 up
-        [SerializeField] private string parriedTrigger = "Parried"; // ✅ opcional
+        [SerializeField] private string parriedTrigger = "Parried";
 
         [Header("Impact timing (fallback si el Animation Event no dispara)")]
         [SerializeField, Range(0f, 0.5f)] private float hitDelaySeconds = 0.08f;
@@ -23,14 +24,21 @@ namespace Game.Enemies
         [SerializeField, Range(0f, 0.12f)] private float hitStopSeconds = 0.06f;
 
         [Header("Debug")]
-        [SerializeField] private bool debugLogs = true;
+        [SerializeField] private bool debugLogs = false;
 
         private Vector2 lockedDir = Vector2.right;
         private Coroutine fallbackHitCo;
         private bool hitDoneThisAttack;
+        private int parriedHash;
+        private AnimatorControllerParameterType parriedParamType;
+        private bool hasParriedParam;
 
         private void OnValidate() => ResolveRefs();
-        private void Awake() => ResolveRefs();
+        private void Awake()
+        {
+            ResolveRefs();
+            CacheOptionalParriedParam();
+        }
 
         private void ResolveRefs()
         {
@@ -39,6 +47,28 @@ namespace Game.Enemies
             // Melee/RB suelen estar en el root; el driver debe estar donde está el Animator
             if (melee == null) melee = GetComponentInParent<EnemyMeleeAttack>();
             if (rb == null) rb = GetComponentInParent<Rigidbody2D>();
+        }
+
+        private void CacheOptionalParriedParam()
+        {
+            hasParriedParam = false;
+            parriedHash = 0;
+
+            if (anim == null || string.IsNullOrWhiteSpace(parriedTrigger))
+                return;
+
+            parriedHash = Animator.StringToHash(parriedTrigger);
+            AnimatorControllerParameter[] parameters = anim.parameters;
+
+            for (int i = 0; i < parameters.Length; i++)
+            {
+                AnimatorControllerParameter parameter = parameters[i];
+                if (parameter.nameHash != parriedHash) continue;
+
+                hasParriedParam = true;
+                parriedParamType = parameter.type;
+                return;
+            }
         }
 
         public void BeginAttack(Vector2 rawDir)
@@ -73,8 +103,22 @@ namespace Game.Enemies
         {
             ResolveRefs();
             if (anim == null) return;
-            anim.ResetTrigger(parriedTrigger);
-            anim.SetTrigger(parriedTrigger);
+
+            if (!hasParriedParam)
+                CacheOptionalParriedParam();
+
+            if (!hasParriedParam)
+                return;
+
+            if (parriedParamType == AnimatorControllerParameterType.Trigger)
+            {
+                anim.ResetTrigger(parriedHash);
+                anim.SetTrigger(parriedHash);
+                return;
+            }
+
+            if (parriedParamType == AnimatorControllerParameterType.Bool)
+                anim.SetBool(parriedHash, true);
         }
 
         // ✅ Pon este nombre en el Animation Event (para evitar “same name…”)
@@ -130,7 +174,7 @@ namespace Game.Enemies
             if (debugLogs) Debug.Log($"[MELEE DRIVER] didHit={didHit}");
 
             if (didHit && hitStopSeconds > 0f)
-                StartCoroutine(HitStop(hitStopSeconds));
+                HitStopManager.Request(hitStopSeconds);
         }
 
         private static bool ShouldUseUp(Vector2 raw)
@@ -140,12 +184,5 @@ namespace Game.Enemies
             return raw.y > 0f && ay > ax;
         }
 
-        private static IEnumerator HitStop(float seconds)
-        {
-            float prev = Time.timeScale;
-            Time.timeScale = 0f;
-            yield return new WaitForSecondsRealtime(seconds);
-            Time.timeScale = prev <= 0f ? 1f : prev;
-        }
     }
 }

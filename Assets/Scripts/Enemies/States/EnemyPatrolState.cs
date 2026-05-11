@@ -8,32 +8,33 @@ namespace Game.Enemies.States
         private bool goingToB;
         private float waitTimer;
 
-        private const float ArriveDist = 0.2f;
+        private const float ArriveDist = 0.8f;
 
         public void Enter(EnemyBase enemy)
         {
+            if (!enemy.HasPatrolPoints)
+            {
+                enemy.SetState(new EnemyIdleState());
+                return;
+            }
+
             Vector2 a = enemy.PatrolA;
             Vector2 b = enemy.PatrolB;
+            float distToA = Mathf.Abs(enemy.RB.position.x - a.x);
+            float distToB = Mathf.Abs(enemy.RB.position.x - b.x);
 
-            float da = Vector2.Distance(enemy.RB.position, a);
-            float db = Vector2.Distance(enemy.RB.position, b);
-
-            currentTarget = (da <= db) ? a : b;
-            goingToB = (currentTarget == b);
-
+            goingToB = distToA <= distToB;
+            currentTarget = goingToB ? b : a;
             waitTimer = 0f;
         }
 
         public void Tick(EnemyBase enemy)
         {
-            if (enemy.CanSeePlayer())
+            if (waitTimer > 0f)
             {
-                enemy.SetState(new EnemyChaseState());
+                waitTimer -= Time.deltaTime;
                 return;
             }
-
-            if (waitTimer > 0f)
-                waitTimer -= Time.deltaTime;
         }
 
         public void FixedTick(EnemyBase enemy)
@@ -44,34 +45,29 @@ namespace Game.Enemies.States
                 return;
             }
 
-            enemy.MoveTowards(currentTarget, enemy.PatrolSpeed, enemy.PatrolAcceleration);
-
-            if (enemy.IsAt(currentTarget, ArriveDist))
+            float dist = Vector2.Distance(enemy.RB.position, currentTarget);
+            if (dist <= ArriveDist)
             {
-                enemy.StopSmooth(30f);
                 waitTimer = enemy.PatrolWaitSeconds;
-
-                Vector2 a = enemy.PatrolA;
-                Vector2 b = enemy.PatrolB;
-
-                if (enemy.PatrolLoopAtoB)
-                {
-                    currentTarget = (currentTarget == a) ? b : a;
-                }
-                else
-                {
-                    if (goingToB)
-                    {
-                        currentTarget = a;
-                        goingToB = false;
-                    }
-                    else
-                    {
-                        currentTarget = b;
-                        goingToB = true;
-                    }
-                }
+                goingToB = !goingToB;
+                currentTarget = goingToB ? enemy.PatrolB : enemy.PatrolA;
+                enemy.StopSmooth(30f);
+                return;
             }
+
+            if (enemy.TryStartNavigationJump(currentTarget, this))
+                return;
+
+            if (enemy.RequiresNavigationJump(currentTarget))
+            {
+                waitTimer = enemy.PatrolWaitSeconds;
+                goingToB = !goingToB;
+                currentTarget = goingToB ? enemy.PatrolB : enemy.PatrolA;
+                enemy.StopSmooth(30f);
+                return;
+            }
+
+            enemy.MoveTowards(currentTarget, enemy.PatrolSpeed, enemy.PatrolAcceleration);
         }
 
         public void Exit(EnemyBase enemy) { }

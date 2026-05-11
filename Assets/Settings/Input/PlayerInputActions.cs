@@ -318,7 +318,7 @@ namespace Game.Input
                 {
                     ""name"": """",
                     ""id"": ""cde5fd55-60e8-4e5a-82c2-8480746b4c93"",
-                    ""path"": ""<Mouse>/leftButton  "",
+                    ""path"": ""<Mouse>/leftButton"",
                     ""interactions"": """",
                     ""processors"": """",
                     ""groups"": """",

@@ -1,7 +1,6 @@
-﻿using System;
-using System.Reflection;
 using UnityEngine;
 using Game.Input;
+using Game.Systems;
 
 namespace Game.Player
 {
@@ -15,6 +14,10 @@ namespace Game.Player
 
         [Header("Debug")]
         public bool debugLogs = false;
+
+        [Header("Stamina")]
+        [SerializeField] private PlayerStamina stamina;
+        [SerializeField, Min(0)] private int dashStaminaCost = 1;
 
         [Header("Facing / Visual")]
         [SerializeField] private Transform visualRoot;
@@ -146,8 +149,7 @@ namespace Game.Player
         private CapsuleCollider2D capsule;
         private PlayerAnimatorDriver animDriver;
 
-        private MonoBehaviour stealthKill; // lo buscamos por tipo para no acoplar
-        private MethodInfo stealthKillTryMethod;
+        [SerializeField] private PlayerStealthKill stealthKill;
 
         private bool isGrounded;
         private bool isTouchingWall;
@@ -182,8 +184,6 @@ namespace Game.Player
         private float wallStickTimer;
         private float wallCoyoteTimer;
 
-        private Coroutine hitStopCo;
-
         // HANG
         private bool isHanging;
         private float ledgeGrabCooldownTimer;
@@ -195,17 +195,14 @@ namespace Game.Player
 
         private bool suppressWallWhileDownHeld;
 
-        // Optional: levantar al pulsar jump
-        private MethodInfo forceStandUpMethod;
-
         public bool FacingLeft => facingDir < 0;
         public bool IsGrounded => isGrounded;
         public bool IsAttacking => isAttacking;
         public bool IsHanging => isHanging;
 
         // Para Animator (si lo usáis)
-        public bool IsCrouching => input != null && GetBoolProp(input, "IsCrouching");
-        public bool IsLayDown => input != null && GetBoolProp(input, "IsLayDown");
+        public bool IsCrouching => input != null && input.IsCrouching;
+        public bool IsLayDown => input != null && input.IsLayDown;
 
         private void Awake()
         {
@@ -214,6 +211,7 @@ namespace Game.Player
             animDriver = GetComponent<PlayerAnimatorDriver>();
 
             if (input == null) input = GetComponent<InputReader>();
+            if (stamina == null) stamina = GetComponent<PlayerStamina>();
             if (visualRoot == null) visualRoot = transform;
 
             defaultGravityScale = rb.gravityScale;
@@ -236,24 +234,8 @@ namespace Game.Player
 
             ApplyFacing(1);
 
-            // Optional hooks via reflection
-            forceStandUpMethod = input != null
-                ? input.GetType().GetMethod("ForceStandUp", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
-                : null;
-
-            // Buscar PlayerStealthKill sin acoplar a clase concreta
-            // (si existe, intentamos llamar TryStealthKill())
-            var comps = GetComponents<MonoBehaviour>();
-            foreach (var c in comps)
-            {
-                if (c == null) continue;
-                if (c.GetType().Name == "PlayerStealthKill")
-                {
-                    stealthKill = c;
-                    stealthKillTryMethod = c.GetType().GetMethod("TryStealthKill", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-                    break;
-                }
-            }
+            if (stealthKill == null)
+                stealthKill = GetComponent<PlayerStealthKill>();
         }
 
         private void Update()
@@ -318,7 +300,7 @@ namespace Game.Player
             // ✅ Jump desde Crouch/LayDown: NO salta; intenta levantarse
             if (jumpPressed && (IsCrouching || IsLayDown))
             {
-                forceStandUpMethod?.Invoke(input, null);
+                input.ForceStandUp();
                 jumpPressed = false;
                 jumpBufferTimer = 0f;
             }
@@ -344,26 +326,14 @@ namespace Game.Player
             // Si estás en Crouch/LayDown, primero intentamos stealth kill con el MISMO botón.
             if (attackPressed)
             {
-                bool didStealthKill = false;
-
-                if ((IsCrouching || IsLayDown) && stealthKill != null && stealthKillTryMethod != null)
-                {
-                    try
-                    {
-                        didStealthKill = (bool)stealthKillTryMethod.Invoke(stealthKill, null);
-                    }
-                    catch { didStealthKill = false; }
-                }
-
-                if (!didStealthKill)
-                {
-                    if (!isDashing && !isAttacking && attackCooldownTimer <= 0f)
-                        StartAttack();
-                }
-                else
+                if (stealthKill != null && stealthKill.TryStealthKill())
                 {
                     attackCooldownTimer = Mathf.Max(attackCooldownTimer, attackCooldown * 0.25f);
+                    return;
                 }
+
+                if (!isDashing && !isAttacking && attackCooldownTimer <= 0f)
+                    StartAttack();
             }
 
             // Jump normal (buffer + coyote)
@@ -449,7 +419,7 @@ namespace Game.Player
             if (didHit)
             {
                 if (hitStopSeconds > 0f)
-                    StartHitStop(hitStopSeconds);
+                    HitStopManager.Request(hitStopSeconds);
 
                 if (lockedAttackDirType == 2 && !isGrounded && pogoBounceForce > 0f)
                     rb.velocity = new Vector2(rb.velocity.x, Mathf.Max(rb.velocity.y, pogoBounceForce));
@@ -465,20 +435,6 @@ namespace Game.Player
 
             if (debugLogs)
                 Debug.Log($"[PLAYER ATTACK] CANCELED by {reason}");
-        }
-
-        private void StartHitStop(float seconds)
-        {
-            if (hitStopCo != null) StopCoroutine(hitStopCo);
-            hitStopCo = StartCoroutine(HitStopRoutine(seconds));
-        }
-
-        private static System.Collections.IEnumerator HitStopRoutine(float seconds)
-        {
-            float prev = Time.timeScale;
-            Time.timeScale = 0f;
-            yield return new WaitForSecondsRealtime(seconds);
-            Time.timeScale = prev <= 0f ? 1f : prev;
         }
 
         private void ComputeAndLockAttackDirection()
@@ -652,6 +608,7 @@ namespace Game.Player
         {
             if (isDashing) return;
             if (dashCooldownTimer > 0f) return;
+            if (!CanSpendDashStamina()) return;
 
             if (!isGrounded)
             {
@@ -660,6 +617,7 @@ namespace Game.Player
                 airDashesRemaining--;
             }
 
+            SpendDashStamina();
             StartDash();
         }
 
@@ -910,12 +868,26 @@ namespace Game.Player
             // Dash desde hang: alejarse
             if (stats.hasDash && input.ConsumeDashPressed())
             {
+                if (!CanSpendDashStamina()) return;
+
                 int dashDir = -facingDir;
                 ExitHang("dash-away");
                 ApplyFacing(dashDir);
+                SpendDashStamina();
                 StartDashOverride(new Vector2(dashDir, 0f));
                 return;
             }
+        }
+
+        private bool CanSpendDashStamina()
+        {
+            return dashStaminaCost <= 0 || (stamina != null && stamina.HasStamina(dashStaminaCost));
+        }
+
+        private void SpendDashStamina()
+        {
+            if (dashStaminaCost <= 0) return;
+            stamina?.SpendStamina(dashStaminaCost);
         }
 
         private void StartDashOverride(Vector2 dir)
@@ -931,23 +903,5 @@ namespace Game.Player
             rb.velocity = dir * stats.dashSpeed;
         }
 
-        // --------------------
-        // UTIL (reflection-safe)
-        // --------------------
-        private static bool GetBoolProp(object obj, string propName)
-        {
-            if (obj == null) return false;
-            try
-            {
-                var p = obj.GetType().GetProperty(propName, BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-                if (p != null && p.PropertyType == typeof(bool))
-                    return (bool)p.GetValue(obj);
-                var f = obj.GetType().GetField(propName, BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-                if (f != null && f.FieldType == typeof(bool))
-                    return (bool)f.GetValue(obj);
-            }
-            catch { }
-            return false;
-        }
     }
 }

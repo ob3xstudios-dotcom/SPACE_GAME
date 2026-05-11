@@ -20,7 +20,7 @@ namespace Game.Input
         [SerializeField, Range(0.2f, 5f)] private float holdSecondsForLayDown = 2f;
 
         [Header("Debug")]
-        [SerializeField] private bool debugInput = true;
+        [SerializeField] private bool debugInput = false;
 
         private PlayerInputActions actions;
 
@@ -99,7 +99,7 @@ namespace Game.Input
             if (actions != null && actions.Gameplay.Parry.WasPressedThisFrame())
             {
                 parryPressed = true;
-                Debug.Log("[INPUT] PARRY WasPressedThisFrame");
+                if (debugInput) Debug.Log("[INPUT] PARRY WasPressedThisFrame");
             }
 
             if (!crouchHeld)
@@ -200,13 +200,13 @@ namespace Game.Input
         private void OnParryStarted(InputAction.CallbackContext ctx)
         {
             parryPressed = true;
-            Debug.Log("[INPUT] PARRY started");
+            if (debugInput) Debug.Log("[INPUT] PARRY started");
         }
 
         private void OnParryPerformed(InputAction.CallbackContext ctx)
         {
             parryPressed = true;
-            Debug.Log("[INPUT] PARRY performed");
+            if (debugInput) Debug.Log("[INPUT] PARRY performed");
         }
 
         private void OnCrouchStarted(InputAction.CallbackContext ctx)

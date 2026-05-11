@@ -60,10 +60,10 @@
     <Analyzer Include="C:\Program Files\Unity\Hub\Editor\2022.3.62f3\Editor\Data\Tools\Unity.SourceGenerators\Unity.Properties.SourceGenerator.dll" />
   </ItemGroup>
   <ItemGroup>
-    <Compile Include="Assets\Scripts\Player\PalyerProgress.cs" />
-    <Compile Include="Assets\Scripts\UI\ManaUI.cs" />
+    <Compile Include="Assets\Scripts\Player\PlayerProgress.cs" />
     <Compile Include="Assets\Scripts\Enemies\EnemyMovementMode.cs" />
     <Compile Include="Assets\Scripts\Enemies\States\EnemyReturnToPatrolState.cs" />
+    <Compile Include="Assets\Scripts\Player\PlayerStamina.cs" />
     <Compile Include="Assets\Scripts\Player\PlayerController.cs" />
     <Compile Include="Assets\Scripts\Player\CharacterStats.cs" />
     <Compile Include="Assets\Scripts\Enemies\Combat\IDamageable.cs" />
@@ -71,16 +71,14 @@
     <Compile Include="Assets\Scripts\Enemies\Sensors\EnemyVision.cs" />
     <Compile Include="Assets\Scripts\Enemies\Combat\EnemyMeleeAnimatorDriver.cs" />
     <Compile Include="Assets\Scripts\Player\PlayerStealthKill.cs" />
-    <Compile Include="Assets\ConsoleTest.cs" />
     <Compile Include="Assets\Scripts\Enemies\States\EnemyAttackState.cs" />
     <Compile Include="Assets\Scripts\Player\PlayerDamageReceiver.cs" />
-    <Compile Include="Assets\Scripts\Core\ResourceChangedEvent.cs" />
     <Compile Include="Assets\Scripts\Events\EnemyKilledEventChannelSO.cs" />
     <Compile Include="Assets\Scripts\Player\PlayerResources.cs" />
-    <Compile Include="Assets\Scripts\Core\Resource.cs" />
     <Compile Include="Assets\Scripts\Enemies\States\EnemyChaseState.cs" />
     <Compile Include="Assets\Scripts\Enemies\States\EnemySearchState.cs" />
     <Compile Include="Assets\Scripts\Enemies\States\EnemyDieState.cs" />
+    <Compile Include="Assets\Scripts\Systems\HitStopManager.cs" />
     <Compile Include="Assets\Scripts\Enemies\States\EnemyPatrolState.cs" />
     <Compile Include="Assets\Scripts\Player\PlayerMana.cs" />
     <Compile Include="Assets\Scripts\Player\PlayerHealth.cs" />
@@ -95,11 +93,11 @@
     <Compile Include="Assets\Scripts\Enemies\Sensors\EnemyAttackSensor.cs" />
     <Compile Include="Assets\Scripts\Core\IntResource.cs" />
     <Compile Include="Assets\Scripts\Enemies\States\EnemyHitState.cs" />
-    <Compile Include="Assets\Scripts\Events\VoidEventChannelSO.cs" />
-    <Compile Include="Assets\IsMoving.cs" />
+    <Compile Include="Assets\Scripts\Enemies\States\EnemyJumpState.cs" />
     <Compile Include="Assets\Scripts\Enemies\IEnemyState.cs" />
     <Compile Include="Assets\Scripts\Systems\KillRewardSystem.cs" />
     <Compile Include="Assets\Settings\Input\PlayerInputActions.cs" />
+    <Compile Include="Assets\Scripts\Player\PlayerStaminaUI.cs" />
     <Compile Include="Assets\Scripts\Enemies\Health.cs" />
     <Compile Include="Assets\Scripts\Player\PlayerManaUI.cs" />
   </ItemGroup>
@@ -1120,6 +1118,10 @@
     <ProjectReference Include="Unity.VisualScripting.Core.Editor.csproj">
       <Project>{D72FD7AF-F4DE-3A79-F79B-01DBCE40E8E8}</Project>
       <Name>Unity.VisualScripting.Core.Editor</Name>
+    </ProjectReference>
+    <ProjectReference Include="Game.EditorTools.csproj">
+      <Project>{B31DEB8F-436B-D0D2-138B-F5430B63B5EE}</Project>
+      <Name>Game.EditorTools</Name>
     </ProjectReference>
     <ProjectReference Include="Unity.VisualScripting.Flow.Editor.csproj">
       <Project>{293FA3F7-F85A-E308-18EF-92623F5AEB95}</Project>

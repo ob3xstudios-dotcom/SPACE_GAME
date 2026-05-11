@@ -1,100 +1,105 @@
-﻿using System;
 using UnityEngine;
 
 namespace Game.Player
 {
+    /// <summary>
+    /// Compatibility bridge. PlayerResources.Mana is the source of truth.
+    /// Keep this component only while old prefabs/scenes still reference PlayerMana.
+    /// </summary>
     public class PlayerMana : MonoBehaviour
     {
-        [Header("Mana")]
-        [SerializeField, Min(0)] private int maxMana = 5;
-        [SerializeField] private int startMana = 0;
+        [Header("Refs")]
+        [SerializeField] private PlayerResources playerResources;
 
         [Header("Debug")]
         [SerializeField] private bool debugLogs = false;
 
-        public int CurrentMana { get; private set; }
-        public int MaxMana => maxMana;
+        public int CurrentMana => playerResources != null ? playerResources.CurrentMana : 0;
+        public int MaxMana => playerResources != null ? playerResources.MaxMana : 0;
 
-        public event Action<int, int> OnManaChanged; // (current, max)
+        public event System.Action<int, int> OnManaChanged;
 
         private void Awake()
         {
-            CurrentMana = Mathf.Clamp(startMana, 0, maxMana);
-            FireChanged();
+            if (playerResources == null)
+                playerResources = GetComponent<PlayerResources>();
 
             if (debugLogs)
-                Debug.Log($"[MANA] Init {CurrentMana}/{maxMana}");
+                Debug.Log($"[MANA BRIDGE] Init {CurrentMana}/{MaxMana}");
         }
 
-        public bool HasMana(int amount = 1) => CurrentMana >= amount;
+        private void OnEnable()
+        {
+            if (playerResources != null && playerResources.Mana != null)
+            {
+                playerResources.Mana.OnChanged += HandleManaChanged;
+                FireChanged();
+            }
+        }
+
+        private void OnDisable()
+        {
+            if (playerResources != null && playerResources.Mana != null)
+                playerResources.Mana.OnChanged -= HandleManaChanged;
+        }
+
+        public bool HasMana(int amount = 1) => playerResources != null && playerResources.HasMana(amount);
 
         public void AddMana(int amount)
         {
             if (amount <= 0) return;
 
             int before = CurrentMana;
-            CurrentMana = Mathf.Clamp(CurrentMana + amount, 0, maxMana);
+            playerResources?.GainMana(amount);
 
             if (debugLogs)
-                Debug.Log($"[MANA] +{amount} → {before} -> {CurrentMana}");
-
-            if (CurrentMana != before)
-                FireChanged();
+                Debug.Log($"[MANA BRIDGE] +{amount} -> {before} -> {CurrentMana}");
         }
 
         public bool ConsumeMana(int amount)
         {
             if (amount <= 0) return true;
 
-            if (CurrentMana < amount)
+            if (playerResources == null || !playerResources.TrySpendMana(amount))
             {
                 if (debugLogs)
-                    Debug.Log($"[MANA] Not enough ({CurrentMana}/{amount})");
+                    Debug.Log($"[MANA BRIDGE] Not enough ({CurrentMana}/{amount})");
                 return false;
             }
 
-            int before = CurrentMana;
-            CurrentMana -= amount;
-
             if (debugLogs)
-                Debug.Log($"[MANA] -{amount} → {before} -> {CurrentMana}");
+                Debug.Log($"[MANA BRIDGE] -{amount} -> {CurrentMana}");
 
-            FireChanged();
             return true;
         }
 
         public void SetMana(int value)
         {
             int before = CurrentMana;
-            CurrentMana = Mathf.Clamp(value, 0, maxMana);
+            playerResources?.SetMana(value);
 
             if (debugLogs)
-                Debug.Log($"[MANA] Set {before} -> {CurrentMana}");
-
-            if (CurrentMana != before)
-                FireChanged();
+                Debug.Log($"[MANA BRIDGE] Set {before} -> {CurrentMana}");
         }
 
-        public void Refill() => SetMana(maxMana);
+        public void Refill() => playerResources?.RefillMana();
 
         public void SetMaxMana(int newMax, bool refill = true)
         {
-            maxMana = Mathf.Max(0, newMax);
-
-            if (refill)
-                CurrentMana = maxMana;
-            else
-                CurrentMana = Mathf.Min(CurrentMana, maxMana);
+            playerResources?.SetMaxMana(newMax, refill);
 
             if (debugLogs)
-                Debug.Log($"[MANA] SetMax {maxMana} | now {CurrentMana}");
+                Debug.Log($"[MANA BRIDGE] SetMax {MaxMana} | now {CurrentMana}");
+        }
 
+        private void HandleManaChanged(int current, int max)
+        {
             FireChanged();
         }
 
         private void FireChanged()
         {
-            OnManaChanged?.Invoke(CurrentMana, maxMana);
+            OnManaChanged?.Invoke(CurrentMana, MaxMana);
         }
     }
 }

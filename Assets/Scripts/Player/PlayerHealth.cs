@@ -39,7 +39,7 @@ namespace Game.Player
         [SerializeField] private bool restoreFullHealthOnRespawn = true;
 
         [Header("Debug")]
-        [SerializeField] private bool debugLogs = true;
+        [SerializeField] private bool debugLogs = false;
 
         private bool invulnerable;
         private Vector3 initialPos;
@@ -323,5 +323,15 @@ namespace Game.Player
             if (debugLogs)
                 Debug.Log($"[PLAYER HEAL] +{amount} => {before}->{after}/{playerResources.Health.Max}");
         }
+
+#if UNITY_EDITOR
+        [ContextMenu("Debug/Apply Two Hits Now")]
+        private void DebugApplyTwoHitsNow()
+        {
+            Vector2 sourcePosition = (Vector2)transform.position + Vector2.right;
+            TakeDamage(1, sourcePosition);
+            TakeDamage(1, sourcePosition);
+        }
+#endif
     }
 }

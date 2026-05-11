@@ -49,7 +49,7 @@ namespace Game.Combat
         [SerializeField] private Game.Events.EnemyKilledEventChannelSO enemyKilledChannel;
 
         [Header("Debug")]
-        [SerializeField] private bool debugLogs = true;
+        [SerializeField] private bool debugLogs = false;
 
         public event Action<Health> OnDied; // opcional (para quien quiera escuchar sin SO)
 

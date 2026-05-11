@@ -14,7 +14,7 @@ TagManager:
   - Wall
   - Camera
   - Enemy
-  - 
+  - Player
   - 
   - 
   - 
@@ -40,4 +40,19 @@ TagManager:
   m_SortingLayers:
   - name: Default
     uniqueID: 0
+    locked: 0
+  - name: Background
+    uniqueID: 1103849923
+    locked: 0
+  - name: Environment Art
+    uniqueID: 1222496417
+    locked: 0
+  - name: Characters
+    uniqueID: 1583063268
+    locked: 0
+  - name: Foreground
+    uniqueID: 2112082129
+    locked: 0
+  - name: Collision Hidden
+    uniqueID: 1751009781
     locked: 0

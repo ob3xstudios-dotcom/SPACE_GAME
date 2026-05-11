@@ -3,28 +3,49 @@ using Game.Combat;
 
 namespace Game.Player
 {
+    /// <summary>
+    /// Compatibility wrapper for old scene/prefab references.
+    /// PlayerHealth owns the real damage flow: i-frames, knockback, death and respawn.
+    /// </summary>
     public class PlayerDamageReceiver : MonoBehaviour, IDamageable
     {
-        [SerializeField] private PlayerResources playerResources;
-        [SerializeField] private bool debugLogs = true;
+        [SerializeField] private PlayerHealth playerHealth;
+        [SerializeField] private bool debugLogs = false;
 
         private void Awake()
         {
-            if (playerResources == null)
-                playerResources = GetComponent<PlayerResources>();
+            ResolvePlayerHealth();
 
             if (debugLogs)
-                Debug.Log($"[PDR] Awake. resources={(playerResources != null ? "OK" : "NULL")}");
+                Debug.Log($"[PDR] Awake. playerHealth={(playerHealth != null ? "OK" : "NULL")}");
         }
 
         public void TakeDamage(int dmg, Vector2 sourcePosition)
         {
             if (debugLogs)
-                Debug.Log($"[PDR] TakeDamage dmg={dmg} from={sourcePosition}");
+                Debug.Log($"[PDR] Forward damage dmg={dmg} from={sourcePosition}");
 
-            if (playerResources == null) return;
+            if (playerHealth == null)
+                ResolvePlayerHealth();
 
-            playerResources.TakeDamage(dmg);
+            if (playerHealth == null)
+            {
+                if (debugLogs)
+                    Debug.LogWarning("[PDR] No PlayerHealth found. Damage ignored.");
+                return;
+            }
+
+            playerHealth.TakeDamage(dmg, sourcePosition);
+        }
+
+        private void ResolvePlayerHealth()
+        {
+            if (playerHealth != null) return;
+
+            playerHealth =
+                GetComponent<PlayerHealth>() ??
+                GetComponentInParent<PlayerHealth>() ??
+                GetComponentInChildren<PlayerHealth>(true);
         }
     }
 }

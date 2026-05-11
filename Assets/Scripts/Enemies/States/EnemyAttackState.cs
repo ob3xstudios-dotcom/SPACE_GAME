@@ -32,7 +32,7 @@ namespace Game.Enemies.States
             if (enemy.Player == null)
             {
                 enemy.SetParryable(false);
-                enemy.SetState(new EnemyReturnToPatrolState());
+                enemy.SetState(enemy.HasPatrolPoints ? new EnemyPatrolState() : new EnemyIdleState());
                 return;
             }
 
@@ -44,7 +44,7 @@ namespace Game.Enemies.States
                 if (!enemy.IsPlayerInAttackRange())
                 {
                     enemy.SetParryable(false);
-                    enemy.SetState(!enemy.CanSeePlayer() && enemy.HasTargetInMemory ? new EnemySearchState() : new EnemyChaseState());
+                    enemy.SetState(enemy.CanSeePlayer() || enemy.HasTargetInMemory ? new EnemyChaseState() : new EnemySearchState());
                     return;
                 }
             }

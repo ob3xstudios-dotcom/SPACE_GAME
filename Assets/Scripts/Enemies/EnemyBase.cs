@@ -11,7 +11,7 @@ namespace Game.Enemies
     public class EnemyBase : MonoBehaviour
     {
         [Header("Debug")]
-        [SerializeField] private bool debugLogs = true;
+        [SerializeField] private bool debugLogs = false;
 
         [Header("Mode")]
         [SerializeField] private EnemyMoveMode mode = EnemyMoveMode.TopDown;
@@ -30,31 +30,34 @@ namespace Game.Enemies
         [SerializeField] private Transform patrolPointB;
         [SerializeField] private Transform patrolCenterOverride;
         [SerializeField, Range(0.1f, 50f)] private float patrolFallbackHalfRange = 3f;
-        [SerializeField, Range(0.1f, 12f)] private float patrolSpeed = 2.2f;
+        [SerializeField, Range(0.1f, 12f)] private float patrolSpeed = 1.5f;
         [SerializeField, Range(0.1f, 50f)] private float patrolAcceleration = 14f;
-        [SerializeField, Range(0f, 5f)] private float patrolWaitSeconds = 0.7f;
+        [SerializeField, Range(0f, 5f)] private float patrolWaitSeconds = 2f;
         [SerializeField] private bool patrolLoopAtoB = false;
 
         public float PatrolSpeed => patrolSpeed;
         public float PatrolAcceleration => patrolAcceleration;
         public float PatrolWaitSeconds => patrolWaitSeconds;
         public bool PatrolLoopAtoB => patrolLoopAtoB;
+        public bool HasPatrolPoints => patrolPointA != null || patrolPointB != null;
 
         [Header("Movement - Chase")]
         [SerializeField, Range(0.5f, 20f)] private float chaseSpeed = 3.5f;
         [SerializeField, Range(0.1f, 80f)] private float chaseAcceleration = 20f;
+        [SerializeField, Range(0f, 10f)] private float memorySeconds = 2.5f;
         public float ChaseSpeed => chaseSpeed;
         public float ChaseAcceleration => chaseAcceleration;
+        public float MemorySeconds => memorySeconds;
 
         [Header("Movement - Search")]
-        [SerializeField, Range(0.1f, 20f)] private float searchSpeed = 2.8f;
+        [SerializeField, Range(0.1f, 20f)] private float searchSpeed = 2.5f;
         [SerializeField, Range(0.1f, 80f)] private float searchAcceleration = 18f;
-        [SerializeField, Range(0.1f, 30f)] private float searchMaxSeconds = 4.0f;
+        [SerializeField, Range(0.1f, 30f)] private float searchSeconds = 1.5f;
         [SerializeField, Range(0.05f, 5f)] private float searchArriveDistance = 0.35f;
 
         public float SearchSpeed => searchSpeed;
         public float SearchAcceleration => searchAcceleration;
-        public float SearchMaxSeconds => searchMaxSeconds;
+        public float SearchSeconds => searchSeconds;
         public float SearchArriveDistance => searchArriveDistance;
 
         [Header("Movement - Return")]
@@ -66,7 +69,25 @@ namespace Game.Enemies
         public float ReturnAcceleration => returnAcceleration;
         public float ReturnArriveDistance => returnArriveDistance;
 
+        [Header("Jump Navigation")]
+        [SerializeField, Min(0f)] private float enemyJumpForce = 8f;
+        [SerializeField, Range(0.1f, 8f)] private float enemyMaxJumpDistance = 2.2f;
+        [SerializeField, Range(0f, 3f)] private float enemyJumpCooldown = 0.8f;
+        [SerializeField, Range(0.05f, 2f)] private float enemyObstacleCheckDistance = 0.45f;
+        [SerializeField] private Transform enemyGroundCheck;
+        [SerializeField] private Transform enemyGapCheck;
+        [SerializeField, Range(0.05f, 1f)] private float enemyGroundCheckDistance = 0.2f;
+        [SerializeField, Range(0.05f, 2f)] private float enemyLandingCheckHeight = 1.2f;
+        [SerializeField, Range(0.05f, 1f)] private float enemyLowObstacleHeight = 0.25f;
+        [SerializeField, Range(0.1f, 2f)] private float enemyHighObstacleHeight = 1.0f;
+        [SerializeField] private LayerMask enemyGroundLayer;
+        [SerializeField] private LayerMask enemyObstacleLayer;
+        [SerializeField] private bool debugJumpGizmos = true;
+
+        public float EnemyJumpForce => enemyJumpForce;
+
         private Rigidbody2D rb;
+        private Collider2D bodyCollider;
         private EnemySensors sensors;
         private EnemyMeleeAttack melee;
 
@@ -99,8 +120,11 @@ namespace Game.Enemies
         [SerializeField, Range(0f, 1f)] private float parryStunDecel = 60f;
         private float parryStunTimer;
         public bool IsStunned => parryStunTimer > 0f;
+        private float jumpCooldownTimer;
+        private float failedJumpRecoveryTimer;
 
         public Vector2 LastKnownPlayerPos { get; private set; }
+        public Vector2 SearchTargetPos { get; private set; }
         public float TimeSinceLastSeen { get; private set; } = Mathf.Infinity;
 
         private Vector2 patrolCenter;
@@ -117,6 +141,7 @@ namespace Game.Enemies
         private void Awake()
         {
             rb = GetComponent<Rigidbody2D>();
+            bodyCollider = GetComponent<Collider2D>();
             sensors = GetComponent<EnemySensors>();
             melee = GetComponent<EnemyMeleeAttack>();
 
@@ -151,7 +176,17 @@ namespace Game.Enemies
                 TimeSinceLastSeen += Time.deltaTime;
             }
 
+            if (jumpCooldownTimer > 0f)
+                jumpCooldownTimer -= Time.deltaTime;
+
+            if (failedJumpRecoveryTimer > 0f)
+                failedJumpRecoveryTimer -= Time.deltaTime;
+
             UpdateAnimatorLocomotion();
+
+            if (TryApplyGlobalStateLogic())
+                return;
+
             currentState?.Tick(this);
         }
 
@@ -188,6 +223,12 @@ namespace Game.Enemies
         public void SetState(IEnemyState next)
         {
             if (next == null) return;
+            if (currentState != null && currentState.GetType() == next.GetType()) return;
+
+            string oldName = currentState != null ? currentState.GetType().Name : "None";
+            string newName = next.GetType().Name;
+            if (debugLogs)
+                Debug.Log($"[STATE] {oldName} -> {newName}");
 
             currentState?.Exit(this);
             currentState = next;
@@ -195,6 +236,41 @@ namespace Game.Enemies
 
             if (debugLogs)
                 Debug.Log($"[ENEMY] {name} -> State: {currentState.GetType().Name}");
+        }
+
+        private bool TryApplyGlobalStateLogic()
+        {
+            if (!AllowsGlobalStateLogic())
+                return false;
+
+            if (CanSeePlayer())
+            {
+                if (currentState is States.EnemyChaseState)
+                    return false;
+
+                SetState(new States.EnemyChaseState());
+                return true;
+            }
+
+            if (currentState is States.EnemyChaseState)
+            {
+                CaptureSearchTargetFromLastKnown();
+                SetState(new States.EnemySearchState());
+                return true;
+            }
+
+            return false;
+        }
+
+        private bool AllowsGlobalStateLogic()
+        {
+            if (currentState == null) return false;
+
+            return currentState is States.EnemyIdleState
+                || currentState is States.EnemyPatrolState
+                || currentState is States.EnemyChaseState
+                || currentState is States.EnemySearchState
+                || currentState is States.EnemyReturnToPatrolState;
         }
 
         public void SetFacingFromVelocity(float vx)
@@ -224,7 +300,13 @@ namespace Game.Enemies
         }
 
         public bool CanSeePlayer() => sensors != null && sensors.HasLineOfSight;
-        public bool HasTargetInMemory => sensors != null && sensors.HasTargetInMemory;
+        public bool HasTargetInMemory => TimeSinceLastSeen <= memorySeconds;
+
+        public void CaptureSearchTargetFromLastKnown()
+        {
+            float targetX = Player != null ? Player.position.x : LastKnownPlayerPos.x;
+            SearchTargetPos = new Vector2(targetX, rb.position.y);
+        }
 
         public bool IsPlayerInAttackRange()
         {
@@ -251,6 +333,13 @@ namespace Game.Enemies
 
             if (Mode == EnemyMoveMode.Platformer)
             {
+                int dir = targetPos.x < rb.position.x ? -1 : 1;
+                if (IsGroundedForJump() && !HasGroundAhead(dir))
+                {
+                    StopSmooth(30f);
+                    return;
+                }
+
                 desired = new Vector2(targetPos.x - rb.position.x, 0f);
                 desired = desired.sqrMagnitude < 0.0001f ? Vector2.zero : desired.normalized * maxSpeed;
 
@@ -270,6 +359,174 @@ namespace Game.Enemies
             SetFacingFromVelocity(newVx);
         }
 
+        public void MoveHorizontallyTo(float targetX, float maxSpeed, float accel)
+        {
+            float deltaX = targetX - rb.position.x;
+            float desiredX = Mathf.Abs(deltaX) < 0.0001f ? 0f : Mathf.Sign(deltaX) * maxSpeed;
+            float newVX = Mathf.MoveTowards(rb.velocity.x, desiredX, accel * Time.fixedDeltaTime);
+
+            if (Mode == EnemyMoveMode.Platformer && Mathf.Abs(deltaX) >= facingDeadzone)
+            {
+                int dir = deltaX < 0f ? -1 : 1;
+                if (IsGroundedForJump() && !HasGroundAhead(dir))
+                {
+                    StopSmooth(30f);
+                    return;
+                }
+            }
+
+            rb.velocity = Mode == EnemyMoveMode.Platformer
+                ? new Vector2(newVX, rb.velocity.y)
+                : new Vector2(newVX, 0f);
+
+            SetFacingFromVelocity(newVX);
+        }
+
+        public bool TryStartNavigationJump(Vector2 targetPos, IEnemyState returnState)
+        {
+            if (Mode != EnemyMoveMode.Platformer) return false;
+            if (jumpCooldownTimer > 0f) return false;
+            if (failedJumpRecoveryTimer > 0f) return false;
+            if (!IsGroundedForJump()) return false;
+
+            float deltaX = targetPos.x - rb.position.x;
+            if (Mathf.Abs(deltaX) < facingDeadzone) return false;
+
+            int dir = deltaX < 0f ? -1 : 1;
+            if (!RequiresNavigationJump(dir)) return false;
+
+            if (!TryFindJumpLanding(dir, targetPos, out Vector2 landingPos))
+                return false;
+
+            float jumpDistance = Mathf.Abs(landingPos.x - rb.position.x);
+            if (jumpDistance > enemyMaxJumpDistance) return false;
+
+            jumpCooldownTimer = enemyJumpCooldown;
+            SetState(new States.EnemyJumpState(returnState, dir, landingPos.x));
+            return true;
+        }
+
+        public void NotifyNavigationJumpFailed()
+        {
+            failedJumpRecoveryTimer = Mathf.Max(failedJumpRecoveryTimer, enemyJumpCooldown * 1.5f);
+            jumpCooldownTimer = Mathf.Max(jumpCooldownTimer, enemyJumpCooldown);
+        }
+
+        public bool RequiresNavigationJump(Vector2 targetPos)
+        {
+            if (Mode != EnemyMoveMode.Platformer) return false;
+
+            float deltaX = targetPos.x - rb.position.x;
+            if (Mathf.Abs(deltaX) < facingDeadzone) return false;
+
+            int dir = deltaX < 0f ? -1 : 1;
+            return RequiresNavigationJump(dir);
+        }
+
+        private bool RequiresNavigationJump(int dir)
+        {
+            return HasLowObstacleAhead(dir) || HasGapAhead(dir);
+        }
+
+        public bool IsGroundedForJump()
+        {
+            Vector2 origin = GroundProbeOrigin();
+            return Physics2D.Raycast(origin, Vector2.down, enemyGroundCheckDistance, GroundMask()).collider != null;
+        }
+
+        private bool HasLowObstacleAhead(int dir)
+        {
+            Vector2 origin = rb.position;
+            Vector2 lowOrigin = origin + Vector2.up * enemyLowObstacleHeight;
+            Vector2 highOrigin = origin + Vector2.up * enemyHighObstacleHeight;
+            Vector2 rayDir = dir < 0 ? Vector2.left : Vector2.right;
+
+            bool lowBlocked = Physics2D.Raycast(lowOrigin, rayDir, enemyObstacleCheckDistance, ObstacleMask()).collider != null;
+            bool highBlocked = Physics2D.Raycast(highOrigin, rayDir, enemyObstacleCheckDistance, ObstacleMask()).collider != null;
+
+            return lowBlocked && !highBlocked;
+        }
+
+        private bool HasGapAhead(int dir)
+        {
+            Vector2 basePos = GapProbeOrigin();
+            Vector2 origin = basePos + Vector2.right * dir * enemyObstacleCheckDistance;
+            return Physics2D.Raycast(origin, Vector2.down, enemyLandingCheckHeight, GroundMask()).collider == null;
+        }
+
+        public bool HasGroundAhead(int dir)
+        {
+            Vector2 basePos = GapProbeOrigin();
+            Vector2 origin = basePos + Vector2.right * dir * enemyObstacleCheckDistance;
+            return Physics2D.Raycast(origin, Vector2.down, enemyLandingCheckHeight, GroundMask()).collider != null;
+        }
+
+        private Vector2 GroundProbeOrigin()
+        {
+            if (enemyGroundCheck != null)
+                return enemyGroundCheck.position;
+
+            if (bodyCollider != null)
+                return new Vector2(bodyCollider.bounds.center.x, bodyCollider.bounds.min.y + 0.03f);
+
+            return rb.position;
+        }
+
+        private Vector2 GapProbeOrigin()
+        {
+            if (enemyGapCheck != null)
+                return enemyGapCheck.position;
+
+            if (bodyCollider != null)
+                return new Vector2(bodyCollider.bounds.center.x, bodyCollider.bounds.min.y + 0.08f);
+
+            return rb.position;
+        }
+
+        private bool TryFindJumpLanding(int dir, Vector2 targetPos, out Vector2 landingPos)
+        {
+            float desiredDistance = Mathf.Min(Mathf.Abs(targetPos.x - rb.position.x), enemyMaxJumpDistance);
+            desiredDistance = Mathf.Max(desiredDistance, enemyObstacleCheckDistance);
+
+            int steps = 4;
+            for (int i = 0; i <= steps; i++)
+            {
+                float t = (float)i / steps;
+                float distance = Mathf.Lerp(desiredDistance, enemyObstacleCheckDistance, t);
+                if (distance <= enemyObstacleCheckDistance * 1.25f)
+                    continue;
+
+                Vector2 origin = rb.position + Vector2.right * dir * distance + Vector2.up * enemyLandingCheckHeight;
+                RaycastHit2D hit = Physics2D.Raycast(origin, Vector2.down, enemyLandingCheckHeight * 2f, GroundMask());
+
+                if (hit.collider == null) continue;
+
+                landingPos = hit.point;
+                return true;
+            }
+
+            landingPos = rb.position;
+            return false;
+        }
+
+        private int GroundMask()
+        {
+            if (enemyGroundLayer.value != 0)
+                return enemyGroundLayer.value;
+
+            int mask = LayerMask.GetMask("Ground", "Wall");
+            return mask != 0 ? mask : Physics2D.DefaultRaycastLayers;
+        }
+
+        private int ObstacleMask()
+        {
+            if (enemyObstacleLayer.value != 0)
+                return enemyObstacleLayer.value;
+
+            int mask = LayerMask.GetMask("Ground", "Wall");
+            return mask != 0 ? mask : GroundMask();
+        }
+
         public void StopSmooth(float decel = 20f)
         {
             float newVX = Mathf.MoveTowards(rb.velocity.x, 0f, decel * Time.fixedDeltaTime);
@@ -285,5 +542,53 @@ namespace Game.Enemies
         }
 
         public bool IsAt(Vector2 pos, float dist) => Vector2.Distance(rb.position, pos) <= dist;
+
+#if UNITY_EDITOR
+        private void OnDrawGizmosSelected()
+        {
+            if (!debugJumpGizmos) return;
+
+            Vector2 origin = Application.isPlaying && rb != null ? rb.position : (Vector2)transform.position;
+            int dir = Application.isPlaying ? FacingDir : 1;
+            Vector2 rayDir = dir < 0 ? Vector2.left : Vector2.right;
+
+            Gizmos.color = Color.green;
+            Vector2 groundOrigin = Application.isPlaying && rb != null ? GroundProbeOrigin() : PreviewGroundProbeOrigin(origin);
+            Gizmos.DrawLine(groundOrigin, groundOrigin + Vector2.down * enemyGroundCheckDistance);
+
+            Gizmos.color = Color.red;
+            Vector2 lowOrigin = origin + Vector2.up * enemyLowObstacleHeight;
+            Vector2 highOrigin = origin + Vector2.up * enemyHighObstacleHeight;
+            Gizmos.DrawLine(lowOrigin, lowOrigin + rayDir * enemyObstacleCheckDistance);
+            Gizmos.DrawLine(highOrigin, highOrigin + rayDir * enemyObstacleCheckDistance);
+
+            Gizmos.color = Color.yellow;
+            Vector2 gapBase = Application.isPlaying && rb != null ? GapProbeOrigin() : PreviewGapProbeOrigin(origin);
+            Vector2 gapOrigin = gapBase + Vector2.right * dir * enemyObstacleCheckDistance;
+            Gizmos.DrawLine(gapOrigin, gapOrigin + Vector2.down * enemyLandingCheckHeight);
+
+            Gizmos.color = Color.cyan;
+            Vector2 landingProbe = origin + Vector2.right * dir * enemyMaxJumpDistance + Vector2.up * enemyLandingCheckHeight;
+            Gizmos.DrawLine(landingProbe, landingProbe + Vector2.down * enemyLandingCheckHeight * 2f);
+        }
+
+        private Vector2 PreviewGroundProbeOrigin(Vector2 fallback)
+        {
+            if (enemyGroundCheck != null)
+                return enemyGroundCheck.position;
+
+            var col = GetComponent<Collider2D>();
+            return col != null ? new Vector2(col.bounds.center.x, col.bounds.min.y + 0.03f) : fallback;
+        }
+
+        private Vector2 PreviewGapProbeOrigin(Vector2 fallback)
+        {
+            if (enemyGapCheck != null)
+                return enemyGapCheck.position;
+
+            var col = GetComponent<Collider2D>();
+            return col != null ? new Vector2(col.bounds.center.x, col.bounds.min.y + 0.08f) : fallback;
+        }
+#endif
     }
 }

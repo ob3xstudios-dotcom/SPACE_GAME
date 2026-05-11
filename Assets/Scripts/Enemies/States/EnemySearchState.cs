@@ -6,44 +6,53 @@ namespace Game.Enemies.States
     {
         private float timer;
         private Vector2 searchTarget;
+        private bool arrived;
 
         public void Enter(EnemyBase enemy)
         {
-            timer = enemy.SearchMaxSeconds;
-            searchTarget = enemy.LastKnownPlayerPos;
+            timer = enemy.SearchSeconds;
+            enemy.CaptureSearchTargetFromLastKnown();
+            searchTarget = enemy.SearchTargetPos;
+            arrived = false;
         }
 
         public void Tick(EnemyBase enemy)
         {
-            if (enemy.CanSeePlayer())
-            {
-                enemy.SetState(new EnemyChaseState());
-                return;
-            }
-
-            searchTarget = enemy.LastKnownPlayerPos;
+            if (!arrived) return;
 
             timer -= Time.deltaTime;
 
             if (timer <= 0f)
             {
-                enemy.SetState(new EnemyReturnToPatrolState());
+                enemy.SetState(enemy.HasPatrolPoints ? new EnemyPatrolState() : new EnemyIdleState());
                 return;
-            }
-
-            if (enemy.IsPlayerInAttackRange() && enemy.HasTargetInMemory)
-            {
-                enemy.SetState(new EnemyAttackState());
             }
         }
 
         public void FixedTick(EnemyBase enemy)
         {
-            enemy.MoveTowards(searchTarget, enemy.SearchSpeed, enemy.SearchAcceleration);
-
-            if (enemy.IsAt(searchTarget, enemy.SearchArriveDistance))
+            if (!arrived)
             {
-                enemy.StopSmooth(30f);
+                float distX = Mathf.Abs(enemy.RB.position.x - searchTarget.x);
+
+                if (distX <= enemy.SearchArriveDistance)
+                {
+                    arrived = true;
+                    enemy.StopSmooth(30f);
+                    return;
+                }
+
+                if (enemy.TryStartNavigationJump(searchTarget, this))
+                    return;
+
+                if (enemy.RequiresNavigationJump(searchTarget))
+                {
+                    arrived = true;
+                    enemy.StopSmooth(30f);
+                    return;
+                }
+
+                enemy.MoveHorizontallyTo(searchTarget.x, enemy.SearchSpeed, enemy.SearchAcceleration);
             }
         }
 

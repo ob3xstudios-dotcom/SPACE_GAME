@@ -1,5 +1,6 @@
 ﻿using System.Collections;
 using UnityEngine;
+using Game.Systems;
 
 namespace Game.Player
 {
@@ -10,6 +11,7 @@ namespace Game.Player
         [SerializeField] private Game.Input.InputReader input;
         [SerializeField] private PlayerAnimatorDriver animDriver;
         [SerializeField] private PlayerMana mana;
+        [SerializeField] private PlayerStamina stamina;
         [SerializeField] private PlayerProgress progress;
 
         [Header("Parry Base")]
@@ -37,20 +39,22 @@ namespace Game.Player
         [SerializeField, Min(0)] private int stunManaCost = 1;
         [SerializeField, Range(0f, 3f)] private float stunSeconds = 0.65f;
 
+        [Header("Stamina Reward")]
+        [SerializeField, Min(0)] private int parryStaminaGain = 1;
+
         [Header("Debug")]
-        [SerializeField] private bool debugLogs = true;
+        [SerializeField] private bool debugLogs = false;
 
         private float cdT;
         private float windowT;
         private float failT;
-        private Coroutine hitStopCo;
-
         private void Awake()
         {
             if (controller == null) controller = GetComponent<PlayerController>();
             if (input == null) input = GetComponent<Game.Input.InputReader>();
             if (animDriver == null) animDriver = GetComponent<PlayerAnimatorDriver>();
             if (mana == null) mana = GetComponent<PlayerMana>();
+            if (stamina == null) stamina = GetComponent<PlayerStamina>();
             if (progress == null) progress = GetComponent<PlayerProgress>();
         }
 
@@ -104,7 +108,7 @@ namespace Game.Player
                 failT = failRecovery;
 
                 if (failHitStop > 0f)
-                    StartHitStop(failHitStop);
+                    HitStopManager.Request(failHitStop);
             }
         }
 
@@ -155,9 +159,10 @@ namespace Game.Player
 
                 enemy.ApplyParryPush(pushDir, pushSpeed, pushLockSeconds);
                 TryApplyDaggerStun(enemy);
+                stamina?.RestoreStamina(parryStaminaGain);
 
                 if (successHitStop > 0f)
-                    StartHitStop(successHitStop);
+                    HitStopManager.Request(successHitStop);
 
                 if (debugLogs)
                     Debug.Log($"[PARRY] SUCCESS on {enemy.name}");
@@ -202,20 +207,6 @@ namespace Game.Player
 
             if (debugLogs)
                 Debug.Log($"[PARRY] dagger stun applied: {stun:0.00}s");
-        }
-
-        private void StartHitStop(float seconds)
-        {
-            if (hitStopCo != null) StopCoroutine(hitStopCo);
-            hitStopCo = StartCoroutine(HitStopRoutine(seconds));
-        }
-
-        private static IEnumerator HitStopRoutine(float seconds)
-        {
-            float prev = Time.timeScale;
-            Time.timeScale = 0f;
-            yield return new WaitForSecondsRealtime(seconds);
-            Time.timeScale = prev <= 0f ? 1f : prev;
         }
 
 #if UNITY_EDITOR

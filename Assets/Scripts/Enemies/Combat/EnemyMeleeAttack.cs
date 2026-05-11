@@ -30,7 +30,7 @@ namespace Game.Enemies.Combat
 
         [Header("Debug")]
         [SerializeField] private bool debugGizmos = true;
-        [SerializeField] private bool debugLogs = true;
+        [SerializeField] private bool debugLogs = false;
 
         private float cd;
 
