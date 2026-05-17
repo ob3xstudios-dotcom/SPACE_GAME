@@ -60,6 +60,7 @@
     <Analyzer Include="C:\Program Files\Unity\Hub\Editor\2022.3.62f3\Editor\Data\Tools\Unity.SourceGenerators\Unity.Properties.SourceGenerator.dll" />
   </ItemGroup>
   <ItemGroup>
+    <Compile Include="Assets\Editor\SceneOrganizationTool.cs" />
     <Compile Include="Assets\Editor\CollisionArtSeparationTool.cs" />
   </ItemGroup>
   <ItemGroup>

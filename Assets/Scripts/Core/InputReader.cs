@@ -15,6 +15,9 @@ namespace Game.Input
         private bool attackPressed;
         private bool dashPressed;
         private bool parryPressed;
+        private bool interactPressed;
+        private bool swingGrabPressed;
+        private bool crouchPressed;
 
         [Header("Crouch / LayDown")]
         [SerializeField, Range(0.2f, 5f)] private float holdSecondsForLayDown = 2f;
@@ -49,9 +52,11 @@ namespace Game.Input
 
             actions.Gameplay.Attack.started += OnAttackStarted;
             actions.Gameplay.Dash.started += OnDashStarted;
+            actions.Gameplay.Interact.started += OnInteractStarted;
 
             actions.Gameplay.Parry.started += OnParryStarted;
             actions.Gameplay.Parry.performed += OnParryPerformed;
+            actions.Gameplay.SwingGrab.started += OnSwingGrabStarted;
 
             actions.Gameplay.Crouch.started += OnCrouchStarted;
             actions.Gameplay.Crouch.canceled += OnCrouchCanceled;
@@ -75,9 +80,11 @@ namespace Game.Input
 
             actions.Gameplay.Attack.started -= OnAttackStarted;
             actions.Gameplay.Dash.started -= OnDashStarted;
+            actions.Gameplay.Interact.started -= OnInteractStarted;
 
             actions.Gameplay.Parry.started -= OnParryStarted;
             actions.Gameplay.Parry.performed -= OnParryPerformed;
+            actions.Gameplay.SwingGrab.started -= OnSwingGrabStarted;
 
             actions.Gameplay.Crouch.started -= OnCrouchStarted;
             actions.Gameplay.Crouch.canceled -= OnCrouchCanceled;
@@ -102,7 +109,26 @@ namespace Game.Input
                 if (debugInput) Debug.Log("[INPUT] PARRY WasPressedThisFrame");
             }
 
+            if (actions != null && actions.Gameplay.Interact.WasPressedThisFrame())
+            {
+                interactPressed = true;
+                if (debugInput) Debug.Log("[INPUT] INTERACT WasPressedThisFrame");
+            }
+
+            if (actions != null && actions.Gameplay.SwingGrab.WasPressedThisFrame())
+            {
+                swingGrabPressed = true;
+                if (debugInput) Debug.Log("[INPUT] SWING GRAB WasPressedThisFrame");
+            }
+
             if (!crouchHeld)
+            {
+                crouchHoldTimer = 0f;
+                layDownTriggeredThisHold = false;
+                return;
+            }
+
+            if (!IsCrouching && !IsLayDown)
             {
                 crouchHoldTimer = 0f;
                 layDownTriggeredThisHold = false;
@@ -147,6 +173,47 @@ namespace Game.Input
             if (!parryPressed) return false;
             parryPressed = false;
             return true;
+        }
+
+        public bool ConsumeInteractPressed()
+        {
+            if (!interactPressed) return false;
+            interactPressed = false;
+            return true;
+        }
+
+        public bool ConsumeSwingGrabPressed()
+        {
+            if (!swingGrabPressed) return false;
+            swingGrabPressed = false;
+            return true;
+        }
+
+        public bool ConsumeCrouchPressed()
+        {
+            if (!crouchPressed) return false;
+            crouchPressed = false;
+            return true;
+        }
+
+        public void ToggleCrouch()
+        {
+            if (IsLayDown)
+            {
+                IsLayDown = false;
+                IsCrouching = true;
+            }
+            else if (IsCrouching)
+            {
+                IsCrouching = false;
+            }
+            else
+            {
+                IsCrouching = true;
+            }
+
+            if (debugInput)
+                Debug.Log($"[INPUT] CROUCH toggle | crouch={IsCrouching} layDown={IsLayDown}");
         }
 
         public void ForceStandUp()
@@ -197,6 +264,13 @@ namespace Game.Input
             if (debugInput) Debug.Log("[INPUT] DASH started");
         }
 
+        private void OnInteractStarted(InputAction.CallbackContext ctx)
+        {
+            interactPressed = true;
+
+            if (debugInput) Debug.Log("[INPUT] INTERACT started");
+        }
+
         private void OnParryStarted(InputAction.CallbackContext ctx)
         {
             parryPressed = true;
@@ -209,28 +283,21 @@ namespace Game.Input
             if (debugInput) Debug.Log("[INPUT] PARRY performed");
         }
 
+        private void OnSwingGrabStarted(InputAction.CallbackContext ctx)
+        {
+            swingGrabPressed = true;
+            if (debugInput) Debug.Log("[INPUT] SWING GRAB started");
+        }
+
         private void OnCrouchStarted(InputAction.CallbackContext ctx)
         {
+            crouchPressed = true;
             crouchHeld = true;
             crouchHoldTimer = 0f;
             layDownTriggeredThisHold = false;
 
-            if (IsLayDown)
-            {
-                IsLayDown = false;
-                IsCrouching = true;
-            }
-            else if (IsCrouching)
-            {
-                IsCrouching = false;
-            }
-            else
-            {
-                IsCrouching = true;
-            }
-
             if (debugInput)
-                Debug.Log($"[INPUT] CROUCH toggle | crouch={IsCrouching} layDown={IsLayDown}");
+                Debug.Log("[INPUT] CROUCH started");
         }
 
         private void OnCrouchCanceled(InputAction.CallbackContext ctx)

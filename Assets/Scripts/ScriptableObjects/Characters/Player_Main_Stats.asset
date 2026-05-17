@@ -18,7 +18,7 @@ MonoBehaviour:
   airAcceleration: 55
   airDeceleration: 35
   turnAccelerationMultiplier: 1.35
-  jumpForce: 12
+  jumpForce: 15
   gravityScale: 1
   fallGravityMultiplier: 2.2
   apexGravityMultiplier: 0.9
@@ -34,6 +34,8 @@ MonoBehaviour:
   allowAirDash: 1
   airDashesMax: 1
   wallSlideSpeed: -2
-  wallJumpForceX: 6
-  wallJumpForceY: 7
-  wallJumpLockTime: 0.15
+  wallSlideAcceleration: 20
+  wallJumpForceX: 8.5
+  wallJumpForceY: 8
+  wallJumpMomentumKeep: 0.25
+  wallJumpLockTime: 0.1

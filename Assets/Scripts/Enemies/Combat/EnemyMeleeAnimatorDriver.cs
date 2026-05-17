@@ -18,7 +18,9 @@ namespace Game.Enemies
         [SerializeField] private string parriedTrigger = "Parried";
 
         [Header("Impact timing (fallback si el Animation Event no dispara)")]
+        [SerializeField] private bool useFallbackHitboxIfNoAnimationEvent = false;
         [SerializeField, Range(0f, 0.5f)] private float hitDelaySeconds = 0.08f;
+        [SerializeField, Range(0.01f, 0.5f)] private float fallbackActiveSeconds = 0.12f;
 
         [Header("Hitstop")]
         [SerializeField, Range(0f, 0.12f)] private float hitStopSeconds = 0.06f;
@@ -28,7 +30,8 @@ namespace Game.Enemies
 
         private Vector2 lockedDir = Vector2.right;
         private Coroutine fallbackHitCo;
-        private bool hitDoneThisAttack;
+        private Coroutine activeWindowCo;
+        private bool hitboxOpenedThisAttack;
         private int parriedHash;
         private AnimatorControllerParameterType parriedParamType;
         private bool hasParriedParam;
@@ -38,6 +41,23 @@ namespace Game.Enemies
         {
             ResolveRefs();
             CacheOptionalParriedParam();
+        }
+
+        private void OnDisable()
+        {
+            if (fallbackHitCo != null)
+            {
+                StopCoroutine(fallbackHitCo);
+                fallbackHitCo = null;
+            }
+
+            if (activeWindowCo != null)
+            {
+                StopCoroutine(activeWindowCo);
+                activeWindowCo = null;
+            }
+
+            melee?.DisableHitbox();
         }
 
         private void ResolveRefs()
@@ -75,7 +95,7 @@ namespace Game.Enemies
         {
             ResolveRefs();
 
-            hitDoneThisAttack = false;
+            hitboxOpenedThisAttack = false;
             lockedDir = (rawDir.sqrMagnitude < 0.0001f) ? Vector2.right : rawDir.normalized;
 
             int dirType = ShouldUseUp(rawDir) ? 1 : 0;
@@ -93,9 +113,12 @@ namespace Game.Enemies
             anim.ResetTrigger(attackTrigger);
             anim.SetTrigger(attackTrigger);
 
-            // Fallback (si el Animation Event no se ejecuta)
+            melee?.BeginAttack(lockedDir);
+
             if (fallbackHitCo != null) StopCoroutine(fallbackHitCo);
-            fallbackHitCo = StartCoroutine(FallbackHitRoutine(hitDelaySeconds));
+            fallbackHitCo = useFallbackHitboxIfNoAnimationEvent
+                ? StartCoroutine(FallbackHitRoutine(hitDelaySeconds))
+                : null;
         }
 
         // ✅ Opcional: feedback de parry en el enemy
@@ -125,31 +148,60 @@ namespace Game.Enemies
         public void Anim_DoMeleeHit_Enemy()
         {
             if (debugLogs) Debug.Log("[MELEE DRIVER] Anim_DoMeleeHit_Enemy CALLED");
-            DoHitOnce();
+            OpenHitboxWindow();
         }
 
         // Compat (si ya lo teníais puesto)
         public void Anim_DoMeleeHit()
         {
             if (debugLogs) Debug.Log("[MELEE DRIVER] Anim_DoMeleeHit CALLED");
-            DoHitOnce();
+            OpenHitboxWindow();
+        }
+
+        public void Anim_EnableEnemyHitbox()
+        {
+            if (debugLogs) Debug.Log("[MELEE DRIVER] Anim_EnableEnemyHitbox CALLED");
+            OpenHitboxWindow(false);
+        }
+
+        public void Anim_DisableEnemyHitbox()
+        {
+            if (debugLogs) Debug.Log("[MELEE DRIVER] Anim_DisableEnemyHitbox CALLED");
+            CloseHitboxWindow();
+        }
+
+        public void Anim_EnemyHitboxSide()
+        {
+            ResolveRefs();
+            melee?.SetAttackDirectionSide();
+        }
+
+        public void Anim_EnemyHitboxUp()
+        {
+            ResolveRefs();
+            melee?.SetAttackDirectionUp();
+        }
+
+        public void Anim_EnemyHitboxDown()
+        {
+            ResolveRefs();
+            melee?.SetAttackDirectionDown();
         }
 
         private IEnumerator FallbackHitRoutine(float delay)
         {
             yield return new WaitForSeconds(delay);
-            if (hitDoneThisAttack) yield break;
+            if (hitboxOpenedThisAttack) yield break;
 
             if (debugLogs)
-                Debug.Log("[MELEE DRIVER] FallbackHit (Animation Event no disparó)");
+                Debug.Log("[MELEE DRIVER] FallbackHitbox (Animation Event no disparó)");
 
-            DoHitOnce();
+            OpenHitboxWindow();
         }
 
-        private void DoHitOnce()
+        private void OpenHitboxWindow(bool autoClose = true)
         {
-            if (hitDoneThisAttack) return;
-            hitDoneThisAttack = true;
+            hitboxOpenedThisAttack = true;
 
             if (fallbackHitCo != null)
             {
@@ -161,17 +213,40 @@ namespace Game.Enemies
 
             if (melee == null || rb == null)
             {
-                Debug.LogError($"[MELEE DRIVER] DoHit FAIL melee={(melee ? "OK" : "NULL")} rb={(rb ? "OK" : "NULL")}");
+                Debug.LogError($"[MELEE DRIVER] OpenHitbox FAIL melee={(melee ? "OK" : "NULL")} rb={(rb ? "OK" : "NULL")}");
                 return;
             }
 
             if (debugLogs)
                 Debug.Log($"[MELEE DRIVER] DoHit rbPos={rb.position} lockedDir={lockedDir} CanAttack={melee.CanAttack}");
 
-            // ✅ IMPORTANTE: NO ForceCooldown en BeginAttack, porque bloquearía este TryAttack()
-            bool didHit = melee.TryAttack(rb.position, lockedDir);
+            melee.SetAttackDirection(lockedDir);
+            melee.ActivateHitbox();
 
-            if (debugLogs) Debug.Log($"[MELEE DRIVER] didHit={didHit}");
+            if (!autoClose) return;
+
+            if (activeWindowCo != null) StopCoroutine(activeWindowCo);
+            activeWindowCo = StartCoroutine(AutoCloseHitboxRoutine(fallbackActiveSeconds));
+        }
+
+        private IEnumerator AutoCloseHitboxRoutine(float seconds)
+        {
+            yield return new WaitForSeconds(seconds);
+            CloseHitboxWindow();
+        }
+
+        private void CloseHitboxWindow()
+        {
+            if (activeWindowCo != null)
+            {
+                StopCoroutine(activeWindowCo);
+                activeWindowCo = null;
+            }
+
+            ResolveRefs();
+
+            bool didHit = melee != null && melee.DidHitThisActivation;
+            melee?.DisableHitbox();
 
             if (didHit && hitStopSeconds > 0f)
                 HitStopManager.Request(hitStopSeconds);

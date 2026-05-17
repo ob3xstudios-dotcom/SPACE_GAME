@@ -11,7 +11,7 @@ namespace Game.Player
         [SerializeField, Range(0f, 1f)] private float behindDotThreshold = 0.35f;
 
         [Header("Debug")]
-        [SerializeField] private bool debugLogs = true;
+        [SerializeField] private bool debugLogs = false;
 
         private Collider2D ownCollider;
 

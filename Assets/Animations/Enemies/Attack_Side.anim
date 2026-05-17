@@ -21,11 +21,17 @@ AnimationClip:
   - serializedVersion: 2
     curve:
     - time: 0
-      value: {fileID: 21300000, guid: 956e8d831e8c6c74f9e9a8523695bb33, type: 3}
+      value: {fileID: 21300000, guid: 675a8e8bfcb5b0941ba65a5eedc9e9fd, type: 3}
     - time: 0.083333336
-      value: {fileID: 21300000, guid: a0c1888ea74ca3b4a87a9dc0c9e471b8, type: 3}
+      value: {fileID: 21300000, guid: 966789ac5b74de1499407ba427031a40, type: 3}
     - time: 0.16666667
-      value: {fileID: 21300000, guid: 108b66d8ba950374ebcee721f6a76802, type: 3}
+      value: {fileID: 21300000, guid: 50341aa0b8b042e49b4d94820036e88f, type: 3}
+    - time: 0.25
+      value: {fileID: 21300000, guid: 981d5210555021b4bb99764fcc6151d3, type: 3}
+    - time: 0.33333334
+      value: {fileID: 21300000, guid: 981d5210555021b4bb99764fcc6151d3, type: 3}
+    - time: 0.41666666
+      value: {fileID: 21300000, guid: e92388857ebabf8488031c49c464f201, type: 3}
     attribute: m_Sprite
     path: 
     classID: 212
@@ -48,15 +54,18 @@ AnimationClip:
       isIntCurve: 0
       isSerializeReferenceCurve: 0
     pptrCurveMapping:
-    - {fileID: 21300000, guid: 956e8d831e8c6c74f9e9a8523695bb33, type: 3}
-    - {fileID: 21300000, guid: a0c1888ea74ca3b4a87a9dc0c9e471b8, type: 3}
-    - {fileID: 21300000, guid: 108b66d8ba950374ebcee721f6a76802, type: 3}
+    - {fileID: 21300000, guid: 675a8e8bfcb5b0941ba65a5eedc9e9fd, type: 3}
+    - {fileID: 21300000, guid: 966789ac5b74de1499407ba427031a40, type: 3}
+    - {fileID: 21300000, guid: 50341aa0b8b042e49b4d94820036e88f, type: 3}
+    - {fileID: 21300000, guid: 981d5210555021b4bb99764fcc6151d3, type: 3}
+    - {fileID: 21300000, guid: 981d5210555021b4bb99764fcc6151d3, type: 3}
+    - {fileID: 21300000, guid: e92388857ebabf8488031c49c464f201, type: 3}
   m_AnimationClipSettings:
     serializedVersion: 2
     m_AdditiveReferencePoseClip: {fileID: 0}
     m_AdditiveReferencePoseTime: 0
     m_StartTime: 0
-    m_StopTime: 0.25
+    m_StopTime: 0.5
     m_OrientationOffsetY: 0
     m_Level: 0
     m_CycleOffset: 0
@@ -76,8 +85,15 @@ AnimationClip:
   m_HasGenericRootTransform: 0
   m_HasMotionFloatCurves: 0
   m_Events:
-  - time: 0.083333336
-    functionName: Anim_DoMeleeHit_Enemy
+  - time: 0.16666667
+    functionName: Anim_EnableEnemyHitbox
+    data: 
+    objectReferenceParameter: {fileID: 0}
+    floatParameter: 0
+    intParameter: 0
+    messageOptions: 0
+  - time: 0.33333334
+    functionName: Anim_DisableEnemyHitbox
     data: 
     objectReferenceParameter: {fileID: 0}
     floatParameter: 0

@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections;
 using UnityEngine;
+using UnityEngine.SceneManagement;
 using Game.Combat;
 
 namespace Game.Player
@@ -262,10 +263,30 @@ namespace Game.Player
 
             if (respawnCo != null) StopCoroutine(respawnCo);
 
-            if (respawnDelay > 0f)
-                respawnCo = StartCoroutine(RespawnRoutine(respawnDelay));
-            else
-                RespawnImmediate();
+            if (ShouldRespawnInPlace())
+            {
+                PrepareForLocalRespawn();
+
+                if (respawnDelay > 0f)
+                    respawnCo = StartCoroutine(RespawnRoutine(respawnDelay));
+                else
+                    RespawnImmediate();
+
+                return;
+            }
+
+            ReloadActiveScene();
+        }
+
+        private bool ShouldRespawnInPlace()
+        {
+            return respawnPoint != null || respawnDelay > 0f;
+        }
+
+        private void ReloadActiveScene()
+        {
+            Time.timeScale = 1f;
+            SceneManager.LoadScene(SceneManager.GetActiveScene().name);
         }
 
         private IEnumerator RespawnRoutine(float delay)
@@ -275,9 +296,30 @@ namespace Game.Player
             respawnCo = null;
         }
 
+        private void PrepareForLocalRespawn()
+        {
+            if (playerController != null)
+            {
+                playerController.ResetTransientState();
+                playerController.enabled = false;
+            }
+
+            if (rb != null)
+            {
+                rb.velocity = Vector2.zero;
+                rb.angularVelocity = 0f;
+            }
+        }
+
         private void RespawnImmediate()
         {
             Vector3 target = respawnPoint != null ? respawnPoint.position : initialPos;
+
+            if (playerController != null)
+            {
+                playerController.enabled = true;
+                playerController.ResetTransientState();
+            }
 
             if (rb != null)
             {
@@ -310,6 +352,67 @@ namespace Game.Player
         // Extras
         // -------------------------
         public void SetRespawnPoint(Transform t) => respawnPoint = t;
+
+        public void RespawnAt(Transform target, bool restoreHealth = false)
+        {
+            RespawnAt(target != null ? target.position : initialPos, restoreHealth);
+        }
+
+        public void RespawnAt(Vector3 target, bool restoreHealth = false)
+        {
+            if (respawnCo != null)
+            {
+                StopCoroutine(respawnCo);
+                respawnCo = null;
+            }
+
+            if (iFramesCo != null)
+            {
+                StopCoroutine(iFramesCo);
+                iFramesCo = null;
+            }
+
+            if (blinkCo != null)
+            {
+                StopCoroutine(blinkCo);
+                blinkCo = null;
+            }
+
+            if (hitStunCo != null)
+            {
+                StopCoroutine(hitStunCo);
+                hitStunCo = null;
+            }
+
+            if (playerController != null)
+            {
+                playerController.enabled = true;
+                playerController.ResetTransientState();
+            }
+
+            if (rb != null)
+            {
+                rb.velocity = Vector2.zero;
+                rb.angularVelocity = 0f;
+                rb.position = target;
+            }
+            else
+            {
+                transform.position = target;
+            }
+
+            if (restoreHealth && playerResources != null && playerResources.Health != null)
+                playerResources.Health.SetCurrent(playerResources.Health.Max);
+
+            invulnerable = false;
+            SetBlinkVisible(true);
+
+            if (spawnIFrames > 0f)
+                StartIFrames(spawnIFrames);
+
+            if (debugLogs) Debug.Log("[PLAYER HEALTH] EXTERNAL RESPAWN");
+            OnRespawned?.Invoke();
+        }
 
         public void Heal(int amount)
         {

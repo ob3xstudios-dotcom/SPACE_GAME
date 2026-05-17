@@ -15,10 +15,10 @@ TagManager:
   - Camera
   - Enemy
   - Player
-  - 
-  - 
-  - 
-  - 
+  - Background
+  - Breakable
+  - BarrelBroken
+  - Groundable
   - 
   - 
   - 
@@ -47,11 +47,17 @@ TagManager:
   - name: Environment Art
     uniqueID: 1222496417
     locked: 0
-  - name: Characters
-    uniqueID: 1583063268
-    locked: 0
   - name: Foreground
     uniqueID: 2112082129
+    locked: 0
+  - name: Ground
+    uniqueID: 301297389
+    locked: 0
+  - name: FronGround
+    uniqueID: 478995159
+    locked: 0
+  - name: Characters
+    uniqueID: 1583063268
     locked: 0
   - name: Collision Hidden
     uniqueID: 1751009781

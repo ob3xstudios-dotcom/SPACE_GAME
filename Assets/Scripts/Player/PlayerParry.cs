@@ -67,6 +67,12 @@ namespace Game.Player
             if (!parryUnlocked) return;
             if (input == null) return;
 
+            if (controller != null && controller.IsSwinging)
+            {
+                input.ConsumeParryPressed();
+                return;
+            }
+
             if (!input.ConsumeParryPressed()) return;
 
             if (debugLogs)
@@ -91,6 +97,8 @@ namespace Game.Player
         {
             if (debugLogs)
                 Debug.Log("[PARRY] START");
+
+            controller?.DropCarriedObject();
 
             cdT = parryCooldown;
             windowT = parryWindow;

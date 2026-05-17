@@ -43,10 +43,7 @@ namespace Game.Player
         {
             if (dmg <= 0) return;
 
-            int before = Health.Current;
             Health.SetCurrent(Health.Current - dmg);
-
-            Debug.Log($"[PR] TakeDamage {dmg} HP {before}->{Health.Current}/{Health.Max}");
         }
 
         public void Heal(int amount)

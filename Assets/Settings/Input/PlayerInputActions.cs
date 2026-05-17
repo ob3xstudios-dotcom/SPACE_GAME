@@ -131,6 +131,15 @@ namespace Game.Input
                     ""initialStateCheck"": false
                 },
                 {
+                    ""name"": ""Interact"",
+                    ""type"": ""Button"",
+                    ""id"": ""4ff74348-2d16-4ae7-8229-21e8424c0375"",
+                    ""expectedControlType"": """",
+                    ""processors"": """",
+                    ""interactions"": ""Press"",
+                    ""initialStateCheck"": false
+                },
+                {
                     ""name"": ""Parry"",
                     ""type"": ""Button"",
                     ""id"": ""6d300660-9627-423a-8890-0eee2967620d"",
@@ -143,6 +152,15 @@ namespace Game.Input
                     ""name"": ""Crouch"",
                     ""type"": ""Button"",
                     ""id"": ""e6391418-650b-4be2-bbe5-55f0b63303d7"",
+                    ""expectedControlType"": """",
+                    ""processors"": """",
+                    ""interactions"": ""Press"",
+                    ""initialStateCheck"": false
+                },
+                {
+                    ""name"": ""SwingGrab"",
+                    ""type"": ""Button"",
+                    ""id"": ""36853191-9274-4461-8dc8-f33365ffb3cf"",
                     ""expectedControlType"": """",
                     ""processors"": """",
                     ""interactions"": ""Press"",
@@ -350,6 +368,28 @@ namespace Game.Input
                 },
                 {
                     ""name"": """",
+                    ""id"": ""c890dc80-8f96-4394-83b8-771022a88073"",
+                    ""path"": ""<Gamepad>/buttonNorth"",
+                    ""interactions"": """",
+                    ""processors"": """",
+                    ""groups"": """",
+                    ""action"": ""Interact"",
+                    ""isComposite"": false,
+                    ""isPartOfComposite"": false
+                },
+                {
+                    ""name"": """",
+                    ""id"": ""e792d296-8ad7-4184-881e-f955b8dac3c1"",
+                    ""path"": ""<Keyboard>/e"",
+                    ""interactions"": """",
+                    ""processors"": """",
+                    ""groups"": """",
+                    ""action"": ""Interact"",
+                    ""isComposite"": false,
+                    ""isPartOfComposite"": false
+                },
+                {
+                    ""name"": """",
                     ""id"": ""d04d8f50-236e-4c91-bb5a-aee9fc0d0c12"",
                     ""path"": ""<Gamepad>/buttonEast"",
                     ""interactions"": """",
@@ -367,6 +407,28 @@ namespace Game.Input
                     ""processors"": """",
                     ""groups"": """",
                     ""action"": ""Parry"",
+                    ""isComposite"": false,
+                    ""isPartOfComposite"": false
+                },
+                {
+                    ""name"": """",
+                    ""id"": ""7f3f6106-3958-4f80-b184-1e8ecd9ee463"",
+                    ""path"": ""<Gamepad>/leftTrigger"",
+                    ""interactions"": """",
+                    ""processors"": """",
+                    ""groups"": """",
+                    ""action"": ""SwingGrab"",
+                    ""isComposite"": false,
+                    ""isPartOfComposite"": false
+                },
+                {
+                    ""name"": """",
+                    ""id"": ""e198608f-679d-4a4f-8730-0659eac1713b"",
+                    ""path"": ""<Keyboard>/g"",
+                    ""interactions"": """",
+                    ""processors"": """",
+                    ""groups"": """",
+                    ""action"": ""SwingGrab"",
                     ""isComposite"": false,
                     ""isPartOfComposite"": false
                 },
@@ -403,8 +465,10 @@ namespace Game.Input
             m_Gameplay_Jump = m_Gameplay.FindAction("Jump", throwIfNotFound: true);
             m_Gameplay_Dash = m_Gameplay.FindAction("Dash", throwIfNotFound: true);
             m_Gameplay_Attack = m_Gameplay.FindAction("Attack", throwIfNotFound: true);
+            m_Gameplay_Interact = m_Gameplay.FindAction("Interact", throwIfNotFound: true);
             m_Gameplay_Parry = m_Gameplay.FindAction("Parry", throwIfNotFound: true);
             m_Gameplay_Crouch = m_Gameplay.FindAction("Crouch", throwIfNotFound: true);
+            m_Gameplay_SwingGrab = m_Gameplay.FindAction("SwingGrab", throwIfNotFound: true);
         }
 
         ~@PlayerInputActions()
@@ -489,8 +553,10 @@ namespace Game.Input
         private readonly InputAction m_Gameplay_Jump;
         private readonly InputAction m_Gameplay_Dash;
         private readonly InputAction m_Gameplay_Attack;
+        private readonly InputAction m_Gameplay_Interact;
         private readonly InputAction m_Gameplay_Parry;
         private readonly InputAction m_Gameplay_Crouch;
+        private readonly InputAction m_Gameplay_SwingGrab;
         /// <summary>
         /// Provides access to input actions defined in input action map "Gameplay".
         /// </summary>
@@ -519,6 +585,10 @@ namespace Game.Input
             /// </summary>
             public InputAction @Attack => m_Wrapper.m_Gameplay_Attack;
             /// <summary>
+            /// Provides access to the underlying input action "Gameplay/Interact".
+            /// </summary>
+            public InputAction @Interact => m_Wrapper.m_Gameplay_Interact;
+            /// <summary>
             /// Provides access to the underlying input action "Gameplay/Parry".
             /// </summary>
             public InputAction @Parry => m_Wrapper.m_Gameplay_Parry;
@@ -526,6 +596,10 @@ namespace Game.Input
             /// Provides access to the underlying input action "Gameplay/Crouch".
             /// </summary>
             public InputAction @Crouch => m_Wrapper.m_Gameplay_Crouch;
+            /// <summary>
+            /// Provides access to the underlying input action "Gameplay/SwingGrab".
+            /// </summary>
+            public InputAction @SwingGrab => m_Wrapper.m_Gameplay_SwingGrab;
             /// <summary>
             /// Provides access to the underlying input action map instance.
             /// </summary>
@@ -564,12 +638,18 @@ namespace Game.Input
                 @Attack.started += instance.OnAttack;
                 @Attack.performed += instance.OnAttack;
                 @Attack.canceled += instance.OnAttack;
+                @Interact.started += instance.OnInteract;
+                @Interact.performed += instance.OnInteract;
+                @Interact.canceled += instance.OnInteract;
                 @Parry.started += instance.OnParry;
                 @Parry.performed += instance.OnParry;
                 @Parry.canceled += instance.OnParry;
                 @Crouch.started += instance.OnCrouch;
                 @Crouch.performed += instance.OnCrouch;
                 @Crouch.canceled += instance.OnCrouch;
+                @SwingGrab.started += instance.OnSwingGrab;
+                @SwingGrab.performed += instance.OnSwingGrab;
+                @SwingGrab.canceled += instance.OnSwingGrab;
             }
 
             /// <summary>
@@ -593,12 +673,18 @@ namespace Game.Input
                 @Attack.started -= instance.OnAttack;
                 @Attack.performed -= instance.OnAttack;
                 @Attack.canceled -= instance.OnAttack;
+                @Interact.started -= instance.OnInteract;
+                @Interact.performed -= instance.OnInteract;
+                @Interact.canceled -= instance.OnInteract;
                 @Parry.started -= instance.OnParry;
                 @Parry.performed -= instance.OnParry;
                 @Parry.canceled -= instance.OnParry;
                 @Crouch.started -= instance.OnCrouch;
                 @Crouch.performed -= instance.OnCrouch;
                 @Crouch.canceled -= instance.OnCrouch;
+                @SwingGrab.started -= instance.OnSwingGrab;
+                @SwingGrab.performed -= instance.OnSwingGrab;
+                @SwingGrab.canceled -= instance.OnSwingGrab;
             }
 
             /// <summary>
@@ -668,6 +754,13 @@ namespace Game.Input
             /// <seealso cref="UnityEngine.InputSystem.InputAction.canceled" />
             void OnAttack(InputAction.CallbackContext context);
             /// <summary>
+            /// Method invoked when associated input action "Interact" is either <see cref="UnityEngine.InputSystem.InputAction.started" />, <see cref="UnityEngine.InputSystem.InputAction.performed" /> or <see cref="UnityEngine.InputSystem.InputAction.canceled" />.
+            /// </summary>
+            /// <seealso cref="UnityEngine.InputSystem.InputAction.started" />
+            /// <seealso cref="UnityEngine.InputSystem.InputAction.performed" />
+            /// <seealso cref="UnityEngine.InputSystem.InputAction.canceled" />
+            void OnInteract(InputAction.CallbackContext context);
+            /// <summary>
             /// Method invoked when associated input action "Parry" is either <see cref="UnityEngine.InputSystem.InputAction.started" />, <see cref="UnityEngine.InputSystem.InputAction.performed" /> or <see cref="UnityEngine.InputSystem.InputAction.canceled" />.
             /// </summary>
             /// <seealso cref="UnityEngine.InputSystem.InputAction.started" />
@@ -681,6 +774,13 @@ namespace Game.Input
             /// <seealso cref="UnityEngine.InputSystem.InputAction.performed" />
             /// <seealso cref="UnityEngine.InputSystem.InputAction.canceled" />
             void OnCrouch(InputAction.CallbackContext context);
+            /// <summary>
+            /// Method invoked when associated input action "SwingGrab" is either <see cref="UnityEngine.InputSystem.InputAction.started" />, <see cref="UnityEngine.InputSystem.InputAction.performed" /> or <see cref="UnityEngine.InputSystem.InputAction.canceled" />.
+            /// </summary>
+            /// <seealso cref="UnityEngine.InputSystem.InputAction.started" />
+            /// <seealso cref="UnityEngine.InputSystem.InputAction.performed" />
+            /// <seealso cref="UnityEngine.InputSystem.InputAction.canceled" />
+            void OnSwingGrab(InputAction.CallbackContext context);
         }
     }
 }

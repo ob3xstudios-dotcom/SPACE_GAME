@@ -5,6 +5,8 @@ namespace Game.Systems
 {
     public class HitStopManager : MonoBehaviour
     {
+        private const bool TraceRespawn = false;
+
         private static HitStopManager instance;
 
         private float restoreTimeScale = 1f;
@@ -15,8 +17,27 @@ namespace Game.Systems
         {
             if (seconds <= 0f) return;
 
+            if (TraceRespawn)
+                Debug.Log($"[RESPAWN TRACE] HitStopManager.Request seconds={seconds:0.000} t={Time.time:0.000} unscaled={Time.unscaledTime:0.000}");
+
             var manager = GetOrCreate();
             manager.RequestInternal(seconds);
+        }
+
+        public static void CancelAll()
+        {
+            Time.timeScale = 1f;
+
+            if (instance == null) return;
+
+            if (instance.hitStopCo != null)
+            {
+                instance.StopCoroutine(instance.hitStopCo);
+                instance.hitStopCo = null;
+            }
+
+            instance.stopUntilRealtime = 0f;
+            instance.restoreTimeScale = 1f;
         }
 
         private static HitStopManager GetOrCreate()
@@ -56,6 +77,9 @@ namespace Game.Systems
 
         private void RequestInternal(float seconds)
         {
+            if (TraceRespawn)
+                Debug.Log($"[RESPAWN TRACE] HitStopManager.DoHitStop seconds={seconds:0.000} t={Time.time:0.000} unscaled={Time.unscaledTime:0.000}");
+
             stopUntilRealtime = Mathf.Max(stopUntilRealtime, Time.unscaledTime + seconds);
 
             if (hitStopCo != null) return;

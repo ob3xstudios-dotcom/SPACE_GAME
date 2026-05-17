@@ -97,11 +97,19 @@ namespace Game.Player
         [Tooltip("Velocidad máxima al deslizar por pared (negativo). Ej: -2.")]
         public float wallSlideSpeed = -2f;
 
+        [Tooltip("Aceleracion para interpolar hacia wallSlideSpeed.")]
+        [Min(0f)]
+        public float wallSlideAcceleration = 20f;
+
         [Tooltip("Fuerza horizontal del wall jump.")]
         public float wallJumpForceX = 12f;
 
         [Tooltip("Fuerza vertical del wall jump.")]
         public float wallJumpForceY = 14f;
+
+        [Tooltip("Parte del momentum horizontal que se conserva si ayuda al wall jump.")]
+        [Range(0f, 1f)]
+        public float wallJumpMomentumKeep = 0.25f;
 
         [Tooltip("Tiempo durante el cual se bloquea el input tras wall jump (evita 'pegarse' a la pared).")]
         [Range(0f, 0.4f)]
@@ -117,6 +125,9 @@ namespace Game.Player
 
             // Seguridad: wallSlideSpeed normalmente es negativo
             if (wallSlideSpeed > 0f) wallSlideSpeed = -Mathf.Abs(wallSlideSpeed);
+
+            // Seguridad: aceleracion no negativa
+            if (wallSlideAcceleration < 0f) wallSlideAcceleration = 0f;
 
             // Seguridad: airDashesMax no negativo
             if (airDashesMax < 0) airDashesMax = 0;

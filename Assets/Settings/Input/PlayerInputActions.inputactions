@@ -43,6 +43,15 @@
                     "initialStateCheck": false
                 },
                 {
+                    "name": "Interact",
+                    "type": "Button",
+                    "id": "4ff74348-2d16-4ae7-8229-21e8424c0375",
+                    "expectedControlType": "",
+                    "processors": "",
+                    "interactions": "Press",
+                    "initialStateCheck": false
+                },
+                {
                     "name": "Parry",
                     "type": "Button",
                     "id": "6d300660-9627-423a-8890-0eee2967620d",
@@ -55,6 +64,15 @@
                     "name": "Crouch",
                     "type": "Button",
                     "id": "e6391418-650b-4be2-bbe5-55f0b63303d7",
+                    "expectedControlType": "",
+                    "processors": "",
+                    "interactions": "Press",
+                    "initialStateCheck": false
+                },
+                {
+                    "name": "SwingGrab",
+                    "type": "Button",
+                    "id": "36853191-9274-4461-8dc8-f33365ffb3cf",
                     "expectedControlType": "",
                     "processors": "",
                     "interactions": "Press",
@@ -262,6 +280,28 @@
                 },
                 {
                     "name": "",
+                    "id": "c890dc80-8f96-4394-83b8-771022a88073",
+                    "path": "<Gamepad>/buttonNorth",
+                    "interactions": "",
+                    "processors": "",
+                    "groups": "",
+                    "action": "Interact",
+                    "isComposite": false,
+                    "isPartOfComposite": false
+                },
+                {
+                    "name": "",
+                    "id": "e792d296-8ad7-4184-881e-f955b8dac3c1",
+                    "path": "<Keyboard>/e",
+                    "interactions": "",
+                    "processors": "",
+                    "groups": "",
+                    "action": "Interact",
+                    "isComposite": false,
+                    "isPartOfComposite": false
+                },
+                {
+                    "name": "",
                     "id": "d04d8f50-236e-4c91-bb5a-aee9fc0d0c12",
                     "path": "<Gamepad>/buttonEast",
                     "interactions": "",
@@ -279,6 +319,28 @@
                     "processors": "",
                     "groups": "",
                     "action": "Parry",
+                    "isComposite": false,
+                    "isPartOfComposite": false
+                },
+                {
+                    "name": "",
+                    "id": "7f3f6106-3958-4f80-b184-1e8ecd9ee463",
+                    "path": "<Gamepad>/leftTrigger",
+                    "interactions": "",
+                    "processors": "",
+                    "groups": "",
+                    "action": "SwingGrab",
+                    "isComposite": false,
+                    "isPartOfComposite": false
+                },
+                {
+                    "name": "",
+                    "id": "e198608f-679d-4a4f-8730-0659eac1713b",
+                    "path": "<Keyboard>/g",
+                    "interactions": "",
+                    "processors": "",
+                    "groups": "",
+                    "action": "SwingGrab",
                     "isComposite": false,
                     "isPartOfComposite": false
                 },

@@ -7,7 +7,7 @@ namespace Game.Enemies.States
         private enum Phase { Windup, Recover }
 
         private const float WindupSeconds = 0.22f;
-        private const float RecoverSeconds = 0.10f;
+        private const float RecoverSeconds = 0.35f;
         private const float StopDecel = 45f;
         private const bool LockTargetDuringWindup = true;
         private const float VerticalBias = 0.55f;
@@ -15,16 +15,40 @@ namespace Game.Enemies.States
 
         private Phase phase;
         private float timer;
+        private int attackDirX;
+        private float advanceMoved;
+        private Vector2 lastAdvancePos;
+        private Vector2 lockedRawDir;
 
         public void Enter(EnemyBase enemy)
         {
             phase = Phase.Windup;
             timer = WindupSeconds;
+            advanceMoved = 0f;
+            lastAdvancePos = enemy.RB.position;
             enemy.SetParryable(true);
             enemy.StopSmooth(StopDecel);
 
             if (enemy.Player != null)
+            {
                 enemy.SetFacingTowards(enemy.Player.position);
+
+                Vector2 enemyCenter = GetCenter(enemy.gameObject, enemy.RB.position);
+                Vector2 playerCenter = GetCenter(enemy.Player.gameObject, enemy.Player.position);
+                lockedRawDir = playerCenter - enemyCenter;
+            }
+            else
+            {
+                lockedRawDir = enemy.Forward;
+            }
+
+            Vector2 snapped = SnapDir(lockedRawDir);
+            attackDirX = snapped.x < 0f ? -1 : 1;
+
+            if (enemy.MeleeDriver != null)
+                enemy.MeleeDriver.BeginAttack(lockedRawDir);
+            else
+                enemy.Melee?.BeginAttack(snapped);
         }
 
         public void Tick(EnemyBase enemy)
@@ -57,14 +81,10 @@ namespace Game.Enemies.States
 
                 enemy.SetParryable(false);
 
-                Vector2 enemyCenter = GetCenter(enemy.gameObject, enemy.RB.position);
-                Vector2 playerCenter = GetCenter(enemy.Player.gameObject, enemy.Player.position);
-                Vector2 raw = playerCenter - enemyCenter;
-
-                if (enemy.MeleeDriver != null)
-                    enemy.MeleeDriver.BeginAttack(raw);
-                else if (enemy.Melee != null && enemy.Melee.CanAttack)
-                    enemy.Melee.TryAttack(enemy.RB.position, SnapDir(raw));
+                if (enemy.MeleeDriver == null && enemy.Melee != null && enemy.Melee.CanAttack)
+                {
+                    enemy.Melee.ActivateHitbox();
+                }
 
                 phase = Phase.Recover;
                 timer = RecoverSeconds;
@@ -79,12 +99,46 @@ namespace Game.Enemies.States
         public void FixedTick(EnemyBase enemy)
         {
             if (phase == Phase.Windup)
-                enemy.StopSmooth(StopDecel);
+            {
+                AdvanceDuringWindup(enemy);
+                return;
+            }
+
+            enemy.StopSmooth(StopDecel);
         }
 
         public void Exit(EnemyBase enemy)
         {
             enemy.SetParryable(false);
+            enemy.Melee?.DisableHitbox();
+        }
+
+        private void AdvanceDuringWindup(EnemyBase enemy)
+        {
+            if (enemy.AttackAdvanceDistance <= 0f)
+            {
+                enemy.StopSmooth(StopDecel);
+                return;
+            }
+
+            if (advanceMoved >= enemy.AttackAdvanceDistance)
+            {
+                enemy.StopSmooth(StopDecel);
+                return;
+            }
+
+            if (!enemy.CanMoveHorizontally(attackDirX))
+            {
+                enemy.StopSmooth(StopDecel);
+                return;
+            }
+
+            bool didMove = enemy.MoveHorizontallyInDirection(attackDirX, enemy.AttackAdvanceSpeed, enemy.AttackAdvanceAcceleration);
+            if (!didMove) return;
+
+            Vector2 current = enemy.RB.position;
+            advanceMoved += Mathf.Abs(current.x - lastAdvancePos.x);
+            lastAdvancePos = current;
         }
 
         public static bool TryParryEnemy(EnemyBase enemy)

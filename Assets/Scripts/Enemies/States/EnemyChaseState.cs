@@ -30,7 +30,7 @@ namespace Game.Enemies.States
 
             if (canSeePlayer && enemy.IsPlayerInAttackRange())
             {
-                enemy.SetState(new EnemyAttackState());
+                enemy.SetState(enemy.HasAttackSpacingToPlayer() ? new EnemyAttackState() : new EnemyAttackSpacingState());
                 return;
             }
 
@@ -39,7 +39,7 @@ namespace Game.Enemies.States
 
             if (canSeePlayer && (Time.time - lastTimeInAttackStartRange) <= AttackCommitTime)
             {
-                enemy.SetState(new EnemyAttackState());
+                enemy.SetState(enemy.HasAttackSpacingToPlayer() ? new EnemyAttackState() : new EnemyAttackSpacingState());
             }
         }
 

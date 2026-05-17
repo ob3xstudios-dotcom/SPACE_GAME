@@ -12,6 +12,8 @@ namespace Game.Player
         [SerializeField] private string groundedParam = "Grounded";
         [SerializeField] private string vyParam = "Vy";
         [SerializeField] private string hangingParam = "Hanging";
+        [SerializeField] private string wallSlidingParam = "WallSliding";
+        [SerializeField] private string wallSideParam = "WallSide";
 
         [Header("Attack Params")]
         [SerializeField] private string attackTrigger = "Attack";
@@ -33,9 +35,11 @@ namespace Game.Player
         private Rigidbody2D rb;
 
         private int speedHash, groundedHash, vyHash, hangingHash;
+        private int wallSlidingHash, wallSideHash;
         private int attackTrigHash, attackDirHash;
         private int parryTrigHash;
         private int crouchHash, layDownHash;
+        private bool hasWallSlidingParam, hasWallSideParam;
 
         private int cachedAttackDir = 0;
 
@@ -49,6 +53,8 @@ namespace Game.Player
             groundedHash = Animator.StringToHash(groundedParam);
             vyHash = Animator.StringToHash(vyParam);
             hangingHash = Animator.StringToHash(hangingParam);
+            wallSlidingHash = Animator.StringToHash(wallSlidingParam);
+            wallSideHash = Animator.StringToHash(wallSideParam);
 
             attackTrigHash = Animator.StringToHash(attackTrigger);
             attackDirHash = Animator.StringToHash(attackDirIntParam);
@@ -57,6 +63,9 @@ namespace Game.Player
 
             crouchHash = Animator.StringToHash(crouchBool);
             layDownHash = Animator.StringToHash(layDownBool);
+
+            hasWallSlidingParam = HasAnimatorParameter(wallSlidingHash, AnimatorControllerParameterType.Bool);
+            hasWallSideParam = HasAnimatorParameter(wallSideHash, AnimatorControllerParameterType.Int);
         }
 
         private void Update()
@@ -70,6 +79,10 @@ namespace Game.Player
             // ✅ Requiere que PlayerController exponga estas props
             anim.SetBool(groundedHash, controller != null && controller.IsGrounded);
             anim.SetBool(hangingHash, controller != null && controller.IsHanging);
+            if (hasWallSlidingParam)
+                anim.SetBool(wallSlidingHash, controller != null && controller.IsWallSliding);
+            if (hasWallSideParam)
+                anim.SetInteger(wallSideHash, controller != null ? controller.WallSide : 0);
 
             // Crouch/LayDown desde InputReader (si existe)
             var input = controller != null ? controller.input : null;
@@ -80,6 +93,18 @@ namespace Game.Player
             }
 
             anim.SetInteger(attackDirHash, cachedAttackDir);
+        }
+
+        private bool HasAnimatorParameter(int hash, AnimatorControllerParameterType type)
+        {
+            for (int i = 0; i < anim.parameterCount; i++)
+            {
+                AnimatorControllerParameter parameter = anim.parameters[i];
+                if (parameter.nameHash == hash && parameter.type == type)
+                    return true;
+            }
+
+            return false;
         }
 
         public void TriggerAttack() => TriggerAttack(cachedAttackDir);

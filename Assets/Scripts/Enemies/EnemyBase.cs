@@ -49,6 +49,23 @@ namespace Game.Enemies
         public float ChaseAcceleration => chaseAcceleration;
         public float MemorySeconds => memorySeconds;
 
+        [Header("Combat - Attack Spacing")]
+        [SerializeField, Range(0f, 5f)] private float attackRequiredDistanceX = 0.75f;
+        [SerializeField, Range(0f, 5f)] private float attackAdvanceDistance = 0.45f;
+        [SerializeField, Range(0f, 5f)] private float attackBackstepDistance = 0.6f;
+        [SerializeField, Range(0.1f, 20f)] private float attackSpacingSpeed = 2.4f;
+        [SerializeField, Range(0.1f, 30f)] private float attackAdvanceSpeed = 5.0f;
+        [SerializeField, Range(0.1f, 80f)] private float attackSpacingAcceleration = 30f;
+        [SerializeField, Range(0.1f, 80f)] private float attackAdvanceAcceleration = 45f;
+
+        public float AttackRequiredDistanceX => attackRequiredDistanceX;
+        public float AttackAdvanceDistance => attackAdvanceDistance;
+        public float AttackBackstepDistance => attackBackstepDistance;
+        public float AttackSpacingSpeed => attackSpacingSpeed;
+        public float AttackAdvanceSpeed => attackAdvanceSpeed;
+        public float AttackSpacingAcceleration => attackSpacingAcceleration;
+        public float AttackAdvanceAcceleration => attackAdvanceAcceleration;
+
         [Header("Movement - Search")]
         [SerializeField, Range(0.1f, 20f)] private float searchSpeed = 2.5f;
         [SerializeField, Range(0.1f, 80f)] private float searchAcceleration = 18f;
@@ -80,6 +97,8 @@ namespace Game.Enemies
         [SerializeField, Range(0.05f, 2f)] private float enemyLandingCheckHeight = 1.2f;
         [SerializeField, Range(0.05f, 1f)] private float enemyLowObstacleHeight = 0.25f;
         [SerializeField, Range(0.1f, 2f)] private float enemyHighObstacleHeight = 1.0f;
+        [SerializeField, Range(0.2f, 6f)] private float playerAboveJumpHeight = 1.0f;
+        [SerializeField, Range(0.2f, 5f)] private float playerAboveHorizontalRange = 1.4f;
         [SerializeField] private LayerMask enemyGroundLayer;
         [SerializeField] private LayerMask enemyObstacleLayer;
         [SerializeField] private bool debugJumpGizmos = true;
@@ -313,6 +332,21 @@ namespace Game.Enemies
             return sensors != null && sensors.IsPlayerInAttackRange(rb.position);
         }
 
+        public bool HasAttackSpacingToPlayer()
+        {
+            if (Player == null) return false;
+            return Mathf.Abs(Player.position.x - rb.position.x) >= attackRequiredDistanceX;
+        }
+
+        public int DirectionToPlayerX()
+        {
+            if (Player == null) return FacingDir;
+
+            float dx = Player.position.x - rb.position.x;
+            if (Mathf.Abs(dx) < facingDeadzone) return FacingDir;
+            return dx < 0f ? -1 : 1;
+        }
+
         public void ApplyParryPush(Vector2 dir, float pushSpeed, float lockSeconds)
         {
             if (dir.sqrMagnitude < 0.0001f) dir = Forward;
@@ -365,10 +399,10 @@ namespace Game.Enemies
             float desiredX = Mathf.Abs(deltaX) < 0.0001f ? 0f : Mathf.Sign(deltaX) * maxSpeed;
             float newVX = Mathf.MoveTowards(rb.velocity.x, desiredX, accel * Time.fixedDeltaTime);
 
-            if (Mode == EnemyMoveMode.Platformer && Mathf.Abs(deltaX) >= facingDeadzone)
+            if (Mathf.Abs(deltaX) >= facingDeadzone)
             {
                 int dir = deltaX < 0f ? -1 : 1;
-                if (IsGroundedForJump() && !HasGroundAhead(dir))
+                if (!CanMoveHorizontally(dir))
                 {
                     StopSmooth(30f);
                     return;
@@ -382,6 +416,39 @@ namespace Game.Enemies
             SetFacingFromVelocity(newVX);
         }
 
+        public bool CanMoveHorizontally(int dir)
+        {
+            if (dir == 0) return false;
+
+            int moveDir = dir < 0 ? -1 : 1;
+            if (HasWallAhead(moveDir)) return false;
+
+            if (Mode == EnemyMoveMode.Platformer && IsGroundedForJump() && !HasGroundAhead(moveDir))
+                return false;
+
+            return true;
+        }
+
+        public bool MoveHorizontallyInDirection(int dir, float maxSpeed, float accel)
+        {
+            if (!CanMoveHorizontally(dir))
+            {
+                StopSmooth(30f);
+                return false;
+            }
+
+            int moveDir = dir < 0 ? -1 : 1;
+            float desiredX = moveDir * Mathf.Max(0f, maxSpeed);
+            float newVX = Mathf.MoveTowards(rb.velocity.x, desiredX, Mathf.Max(0f, accel) * Time.fixedDeltaTime);
+
+            rb.velocity = Mode == EnemyMoveMode.Platformer
+                ? new Vector2(newVX, rb.velocity.y)
+                : new Vector2(newVX, 0f);
+
+            SetFacingFromVelocity(newVX);
+            return true;
+        }
+
         public bool TryStartNavigationJump(Vector2 targetPos, IEnemyState returnState)
         {
             if (Mode != EnemyMoveMode.Platformer) return false;
@@ -390,10 +457,19 @@ namespace Game.Enemies
             if (!IsGroundedForJump()) return false;
 
             float deltaX = targetPos.x - rb.position.x;
-            if (Mathf.Abs(deltaX) < facingDeadzone) return false;
+            bool playerIsAbove = ShouldJumpTowardHigherTarget(targetPos);
+            if (Mathf.Abs(deltaX) < facingDeadzone && !playerIsAbove) return false;
 
-            int dir = deltaX < 0f ? -1 : 1;
-            if (!RequiresNavigationJump(dir)) return false;
+            int dir = Mathf.Abs(deltaX) < facingDeadzone ? FacingDir : (deltaX < 0f ? -1 : 1);
+            bool obstacleJump = RequiresNavigationJump(dir);
+            if (!obstacleJump && !playerIsAbove) return false;
+
+            if (playerIsAbove && !obstacleJump)
+            {
+                jumpCooldownTimer = enemyJumpCooldown;
+                SetState(new States.EnemyJumpState(returnState, dir, rb.position.x));
+                return true;
+            }
 
             if (!TryFindJumpLanding(dir, targetPos, out Vector2 landingPos))
                 return false;
@@ -420,12 +496,12 @@ namespace Game.Enemies
             if (Mathf.Abs(deltaX) < facingDeadzone) return false;
 
             int dir = deltaX < 0f ? -1 : 1;
-            return RequiresNavigationJump(dir);
+            return RequiresNavigationJump(dir) || ShouldJumpTowardHigherTarget(targetPos);
         }
 
         private bool RequiresNavigationJump(int dir)
         {
-            return HasLowObstacleAhead(dir) || HasGapAhead(dir);
+            return HasLowObstacleAhead(dir) || HasWallAhead(dir) || HasGapAhead(dir);
         }
 
         public bool IsGroundedForJump()
@@ -445,6 +521,24 @@ namespace Game.Enemies
             bool highBlocked = Physics2D.Raycast(highOrigin, rayDir, enemyObstacleCheckDistance, ObstacleMask()).collider != null;
 
             return lowBlocked && !highBlocked;
+        }
+
+        private bool HasWallAhead(int dir)
+        {
+            Vector2 origin = bodyCollider != null ? (Vector2)bodyCollider.bounds.center : rb.position;
+            Vector2 rayDir = dir < 0 ? Vector2.left : Vector2.right;
+            return Physics2D.Raycast(origin, rayDir, enemyObstacleCheckDistance, ObstacleMask()).collider != null;
+        }
+
+        private bool ShouldJumpTowardHigherTarget(Vector2 targetPos)
+        {
+            float deltaY = targetPos.y - rb.position.y;
+            if (deltaY < playerAboveJumpHeight) return false;
+            if (Mathf.Abs(targetPos.x - rb.position.x) > playerAboveHorizontalRange) return false;
+
+            Vector2 origin = rb.position + Vector2.up * enemyHighObstacleHeight;
+            float checkDistance = Mathf.Max(0.05f, deltaY);
+            return Physics2D.Raycast(origin, Vector2.up, checkDistance, ObstacleMask()).collider == null;
         }
 
         private bool HasGapAhead(int dir)
