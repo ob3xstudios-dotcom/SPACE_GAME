@@ -204,7 +204,7 @@ namespace Game.Enemies.Combat
             float ax = Mathf.Abs(attackDir.x);
             float ay = Mathf.Abs(attackDir.y);
 
-            bool forceVertical = ay >= forceVerticalIfAbsYOver;
+            bool forceVertical = ay >= forceVerticalIfAbsYOver && ay > ax;
             bool chooseVertical = forceVertical || ay >= ax * verticalBias;
 
             if (chooseVertical)
