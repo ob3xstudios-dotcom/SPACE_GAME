@@ -71,12 +71,18 @@ namespace Game.Systems
 
         private void HandlePlayerDied()
         {
-            if (respawning) return;
+            RespawnPlayerAtCheckpoint();
+        }
+
+        public bool RespawnPlayerAtCheckpoint()
+        {
+            if (respawning) return true;
 
             if (respawnRoutine != null)
                 StopCoroutine(respawnRoutine);
 
             respawnRoutine = StartCoroutine(RespawnPlayerRoutine());
+            return true;
         }
 
         private IEnumerator RespawnPlayerRoutine()

@@ -37,6 +37,9 @@ namespace Game.Systems
             if (reloading) return;
             if (player.position.y >= fallY) return;
 
+            if (TryRespawnWithGameManager())
+                return;
+
             ReloadActiveScene();
         }
 
@@ -44,6 +47,17 @@ namespace Game.Systems
         {
             if (string.IsNullOrWhiteSpace(activeSceneName)) return true;
             return SceneManager.GetActiveScene().name == activeSceneName;
+        }
+
+        private bool TryRespawnWithGameManager()
+        {
+            GameManager gameManager = GameManager.Instance;
+            if (gameManager == null) return false;
+
+            if (debugLogs)
+                Debug.Log("[FALL RESPAWN] Respawn via GameManager");
+
+            return gameManager.RespawnPlayerAtCheckpoint();
         }
 
         private void ReloadActiveScene()
