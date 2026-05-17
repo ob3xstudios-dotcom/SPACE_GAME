@@ -13,3 +13,12 @@
 # OS files
 .DS_Store
 Thumbs.db
+
+Library/
+Temp/
+Obj/
+Build/
+Builds/
+Logs/
+UserSettings/
+MemoryCaptures/
