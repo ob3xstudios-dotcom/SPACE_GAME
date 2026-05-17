@@ -32,6 +32,8 @@ namespace Game.Player
         [SerializeField] private SpriteRenderer[] blinkRenderers;
 
         [Header("Death / Respawn")]
+        [Tooltip("If true, another system listens to OnDied and calls RespawnAt.")]
+        [SerializeField] private bool externalDeathHandling = false;
         [Tooltip("Si es null, usa posición inicial.")]
         [SerializeField] private Transform respawnPoint;
         [Tooltip("Delay antes de respawnear. 0 = instantáneo.")]
@@ -59,6 +61,7 @@ namespace Game.Player
         public event Action OnRespawned;
 
         public bool IsInvulnerable => invulnerable;
+        public bool ExternalDeathHandling => externalDeathHandling;
 
         private void Awake()
         {
@@ -257,9 +260,16 @@ namespace Game.Player
         private void Die()
         {
             if (debugLogs) Debug.Log("[PLAYER HEALTH] DIED");
-            OnDied?.Invoke();
-
             invulnerable = true;
+
+            if (externalDeathHandling)
+            {
+                PrepareForLocalRespawn();
+                OnDied?.Invoke();
+                return;
+            }
+
+            OnDied?.Invoke();
 
             if (respawnCo != null) StopCoroutine(respawnCo);
 
@@ -352,6 +362,7 @@ namespace Game.Player
         // Extras
         // -------------------------
         public void SetRespawnPoint(Transform t) => respawnPoint = t;
+        public void SetExternalDeathHandling(bool enabled) => externalDeathHandling = enabled;
 
         public void RespawnAt(Transform target, bool restoreHealth = false)
         {
