@@ -65,6 +65,7 @@
     <Compile Include="Assets\Scripts\Enemies\States\EnemyAttackSpacingState.cs" />
     <Compile Include="Assets\Scripts\Barrels\BarrelHideTriggerTop.cs" />
     <Compile Include="Assets\Scripts\Enemies\EnemyMovementMode.cs" />
+    <Compile Include="Assets\Scripts\Systems\GameManager.cs" />
     <Compile Include="Assets\Scripts\Enemies\States\EnemyReturnToPatrolState.cs" />
     <Compile Include="Assets\Scripts\Player\PlayerStamina.cs" />
     <Compile Include="Assets\Scripts\Player\PlayerController.cs" />
@@ -81,6 +82,7 @@
     <Compile Include="Assets\Scripts\Systems\LevelExit.cs" />
     <Compile Include="Assets\Scripts\Systems\ParallaxBackground.cs" />
     <Compile Include="Assets\Scripts\Enemies\Combat\EnemyMeleeAnimatorDriver.cs" />
+    <Compile Include="Assets\Scripts\Systems\Checkpoint.cs" />
     <Compile Include="Assets\Scripts\Interaction\InteractableBase.cs" />
     <Compile Include="Assets\Scripts\Player\PlayerStealthKill.cs" />
     <Compile Include="Assets\Scripts\World\LedgeGrabPoint.cs" />

@@ -1,4 +1,3 @@
-using Game.Player;
 using UnityEngine;
 
 namespace Game.Systems
@@ -26,9 +25,7 @@ namespace Game.Systems
         private bool IsPlayer(Collider2D other)
         {
             if (other == null) return false;
-            return other.CompareTag(playerTag) ||
-                   other.GetComponentInParent<PlayerHealth>() != null ||
-                   other.GetComponentInChildren<PlayerHealth>(true) != null;
+            return other.CompareTag(playerTag);
         }
 
         private void OnDrawGizmos()
