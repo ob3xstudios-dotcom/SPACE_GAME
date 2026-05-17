@@ -10,6 +10,8 @@ namespace Game.Systems
         [SerializeField] private SpriteRenderer visualRenderer;
         [SerializeField] private Color inactiveColor = new Color(1f, 1f, 1f, 0.45f);
         [SerializeField] private Color activeColor = new Color(0.35f, 1f, 0.4f, 1f);
+        [SerializeField] private AudioSource activationAudio;
+        [SerializeField] private ParticleSystem activationParticles;
         [SerializeField] private Color gizmoColor = new Color(0.2f, 1f, 0.35f, 0.9f);
         [SerializeField, Min(0.05f)] private float gizmoRadius = 0.3f;
 
@@ -30,6 +32,7 @@ namespace Game.Systems
                 manager.SetActiveCheckpoint(this);
 
             ApplyVisual(true);
+            PlayActivationFeedback();
         }
 
         private bool IsPlayer(Collider2D other)
@@ -42,6 +45,15 @@ namespace Game.Systems
         {
             if (visualRenderer == null) return;
             visualRenderer.color = active ? activeColor : inactiveColor;
+        }
+
+        private void PlayActivationFeedback()
+        {
+            if (activationAudio != null)
+                activationAudio.Play();
+
+            if (activationParticles != null)
+                activationParticles.Play();
         }
 
 #if UNITY_EDITOR
