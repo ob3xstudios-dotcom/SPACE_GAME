@@ -58,6 +58,7 @@ namespace Game.Player
 
         [Header("Tuning (Designer) - Wall Input")]
         [SerializeField, Range(0.01f, 0.5f)] private float wallInputDeadzone = 0.2f;
+        [SerializeField, Range(0.01f, 0.2f)] private float facingInputDeadzone = 0.05f;
         [SerializeField] private bool requirePushIntoWallForSlide = true;
 
         [Header("Wall Debug Temporal")]
@@ -472,7 +473,8 @@ namespace Game.Player
                 cornerStuckDebugLogTimer -= Time.deltaTime;
 
             // Input limpio (para wall/ledge/hang)
-            float inputX = Mathf.Clamp(input.MoveInput.x, -1f, 1f);
+            float rawInputX = Mathf.Clamp(input.MoveInput.x, -1f, 1f);
+            float inputX = rawInputX;
             float inputY = Mathf.Clamp(input.MoveInput.y, -1f, 1f);
             if (Mathf.Abs(inputX) < wallInputDeadzone) inputX = 0f;
             if (Mathf.Abs(inputY) < wallInputDeadzone) inputY = 0f;
@@ -509,8 +511,8 @@ namespace Game.Player
             }
 
             // Flip por movimiento (si no está lockeado por parry)
-            if (!IsMoveLockedByParry && inputX != 0f)
-                ApplyFacing((int)Mathf.Sign(inputX));
+            if (!IsMoveLockedByParry && Mathf.Abs(rawInputX) >= facingInputDeadzone)
+                ApplyFacing((int)Mathf.Sign(rawInputX));
 
             CheckGround();
             CheckWall(inputY);
