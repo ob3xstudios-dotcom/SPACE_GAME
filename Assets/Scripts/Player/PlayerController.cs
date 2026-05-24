@@ -644,6 +644,7 @@ namespace Game.Player
             }
 
             suppressWallSlideThisFixed = false;
+            CheckGround();
             HandleCornerAntiStuck();
             HandleWallSlide();
             LogWallDebugState();
@@ -1478,6 +1479,19 @@ namespace Game.Player
                 return;
             }
 
+            if (isGrounded)
+            {
+                isTouchingWall = false;
+                isWallSliding = false;
+                wallSide = 0;
+                wallStickTimer = 0f;
+                wallCoyoteTimer = 0f;
+                wallStickSide = 0;
+                wallCoyoteSide = 0;
+                ClearSameWallClimbBlock();
+                return;
+            }
+
             float inputX = Mathf.Clamp(input.MoveInput.x, -1f, 1f);
             if (Mathf.Abs(inputX) < wallInputDeadzone) inputX = 0f;
 
@@ -1504,16 +1518,6 @@ namespace Game.Player
             {
                 isTouchingWall = true;
                 wallSide = -1;
-            }
-
-            if (isGrounded)
-            {
-                ClearSameWallClimbBlock();
-                wallStickTimer = 0f;
-                wallCoyoteTimer = 0f;
-                wallStickSide = 0;
-                wallCoyoteSide = 0;
-                return;
             }
 
             if (isTouchingWall)
@@ -1584,7 +1588,7 @@ namespace Game.Player
 
         private bool IsValidWallNormalForSide(Vector2 normal, int side)
         {
-            return normal.x * side <= -wallNormalMinX;
+            return normal.x * side <= -wallNormalMinX && normal.y < groundNormalMinY;
         }
 
         private void LogAcceptedWallHit(int side, RaycastHit2D hit)

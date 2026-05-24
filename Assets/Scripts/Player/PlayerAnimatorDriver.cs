@@ -25,6 +25,7 @@ namespace Game.Player
         [SerializeField] private string wallImpactStateName = "Monkey_WallImpact";
         [SerializeField] private string wallSlideStateName = "Monkey_WallSlide";
         [SerializeField] private string wallJumpStartStateName = "Monkey_WallJumpStart";
+        [SerializeField] private string jumpEndStateName = "Base Layer.Locomotion.Monkey_JumpEnd";
         [SerializeField] private string idleStateName = "Base Layer.Locomotion.Monkey_Idle";
         [SerializeField] private string runStateName = "Base Layer.Locomotion.Monkey_Run";
         [SerializeField] private string fallingStateName = "Base Layer.Locomotion.Monkey_Falling";
@@ -45,6 +46,7 @@ namespace Game.Player
         [SerializeField, Range(0f, 1f)] private float movingThreshold = 0.05f;
         [SerializeField, Range(0.1f, 1f)] private float minRunAnimSpeed = 0.35f;
         [SerializeField, Range(1f, 2f)] private float maxRunAnimSpeed = 1.25f;
+        [SerializeField, Range(0f, 0.25f)] private float jumpEndVisualLockTime = 0.25f;
 
         private Animator anim;
         private PlayerController controller;
@@ -59,6 +61,7 @@ namespace Game.Player
         private bool hasWallSlidingParam, hasWallSideParam, hasJumpStartParam, hasJumpEndParam;
         private bool hasWallImpactParam, hasWallJumpStartParam;
         private bool hasGroundedSample, wasGrounded, wasTouchingWall, wasWallSliding;
+        private float jumpEndVisualLockTimer;
 
         private int cachedAttackDir = 0;
 
@@ -107,15 +110,18 @@ namespace Game.Player
                 ? Mathf.Clamp(speedX / maxRunSpeed, minRunAnimSpeed, maxRunAnimSpeed)
                 : 1f;
 
+            if (jumpEndVisualLockTimer > 0f)
+                jumpEndVisualLockTimer = Mathf.Max(0f, jumpEndVisualLockTimer - Time.deltaTime);
+
             anim.SetFloat(speedHash, speedX > movingThreshold ? speedX : 0f);
             anim.SetFloat(runAnimSpeedHash, runAnimSpeed);
             anim.SetFloat(vyHash, vy);
 
             // ✅ Requiere que PlayerController exponga estas props
             bool isGrounded = controller != null && controller.IsGrounded;
-            bool isTouchingWall = controller != null && controller.IsTouchingWall;
-            bool isWallSliding = controller != null && controller.IsWallSliding;
-            bool isPushingIntoWall = controller != null && controller.IsPushingIntoWall;
+            bool isTouchingWall = !isGrounded && controller != null && controller.IsTouchingWall;
+            bool isWallSliding = !isGrounded && controller != null && controller.IsWallSliding;
+            bool isPushingIntoWall = !isGrounded && controller != null && controller.IsPushingIntoWall;
             anim.SetBool(groundedHash, isGrounded);
             anim.SetBool(hangingHash, controller != null && controller.IsHanging);
             if (hasGroundedSample && !wasGrounded && isGrounded && (controller == null || !controller.IsNormalJumpAnticipating))
@@ -126,7 +132,7 @@ namespace Game.Player
             if (hasWallSlidingParam)
                 anim.SetBool(wallSlidingHash, isWallSliding);
             if (hasWallSideParam)
-                anim.SetInteger(wallSideHash, controller != null ? controller.WallSide : 0);
+                anim.SetInteger(wallSideHash, !isGrounded && controller != null ? controller.WallSide : 0);
             UpdateWallAnimations(isGrounded, isTouchingWall, isWallSliding, isPushingIntoWall);
 
             // Crouch/LayDown desde InputReader (si existe)
@@ -154,11 +160,21 @@ namespace Game.Player
 
         private void UpdateWallAnimations(bool isGrounded, bool isTouchingWall, bool isWallSliding, bool isPushingIntoWall)
         {
+            if (jumpEndVisualLockTimer > 0f)
+                return;
+
+            if (isGrounded)
+            {
+                wasTouchingWall = false;
+                wasWallSliding = false;
+                return;
+            }
+
             bool isInWallJumpStart = IsInState(wallJumpStartStateName);
             if (isInWallJumpStart)
             {
                 if (GetCurrentStateNormalizedTime() >= 1f)
-                    anim.Play(fallingStateName, 0, 0f);
+                    PlayManual(fallingStateName);
 
                 wasTouchingWall = isTouchingWall;
                 wasWallSliding = isWallSliding;
@@ -169,12 +185,12 @@ namespace Game.Player
                 TriggerWallImpact();
 
             if (!wasWallSliding && isWallSliding && !IsInState(wallImpactStateName))
-                anim.Play(wallSlideStateName, 0, 0f);
+                PlayManual(wallSlideStateName);
             else if (wasWallSliding && !isWallSliding && !isGrounded)
-                anim.Play(fallingStateName, 0, 0f);
+                PlayManual(fallingStateName);
 
             if (IsInState(wallImpactStateName) && GetCurrentStateNormalizedTime() >= 1f)
-                anim.Play(isWallSliding ? wallSlideStateName : fallingStateName, 0, 0f);
+                PlayManual(isWallSliding ? wallSlideStateName : fallingStateName);
 
             wasTouchingWall = isTouchingWall;
             wasWallSliding = isWallSliding;
@@ -190,6 +206,14 @@ namespace Game.Player
             return anim.GetCurrentAnimatorStateInfo(0).normalizedTime;
         }
 
+        private void PlayManual(string stateName)
+        {
+            if (jumpEndVisualLockTimer > 0f && stateName != jumpEndStateName)
+                return;
+
+            anim.Play(stateName, 0, 0f);
+        }
+
         public void TriggerJumpStart()
         {
             if (!hasJumpStartParam) return;
@@ -198,7 +222,7 @@ namespace Game.Player
                 anim.ResetTrigger(jumpEndHash);
             anim.ResetTrigger(jumpStartHash);
             anim.SetTrigger(jumpStartHash);
-            anim.Play(jumpStartStateName, 0, 0f);
+            PlayManual(jumpStartStateName);
         }
 
         private void TriggerWallImpact()
@@ -209,7 +233,7 @@ namespace Game.Player
                 anim.SetTrigger(wallImpactHash);
             }
 
-            anim.Play(wallImpactStateName, 0, 0f);
+            PlayManual(wallImpactStateName);
         }
 
         public void TriggerWallJumpStart()
@@ -220,7 +244,7 @@ namespace Game.Player
                 anim.SetTrigger(wallJumpStartHash);
             }
 
-            anim.Play(wallJumpStartStateName, 0, 0f);
+            PlayManual(wallJumpStartStateName);
         }
 
         public void CancelJumpStart()
@@ -234,15 +258,19 @@ namespace Game.Player
             string targetState = !isGrounded
                 ? fallingStateName
                 : Mathf.Abs(rb.velocity.x) > movingThreshold ? runStateName : idleStateName;
-            anim.Play(targetState, 0, 0f);
+            PlayManual(targetState);
         }
 
         private void TriggerJumpEnd()
         {
             if (!hasJumpEndParam) return;
 
+            if (hasJumpStartParam)
+                anim.ResetTrigger(jumpStartHash);
             anim.ResetTrigger(jumpEndHash);
             anim.SetTrigger(jumpEndHash);
+            jumpEndVisualLockTimer = jumpEndVisualLockTime;
+            PlayManual(jumpEndStateName);
         }
 
         public void TriggerAttack() => TriggerAttack(cachedAttackDir);
