@@ -233,12 +233,19 @@ namespace Game.Player
 
         [SerializeField] private PlayerStealthKill stealthKill;
 
+        [Header("Jump Anticipation")]
+        [SerializeField, Min(0f)] private float jumpStartDelay = 0.19f;
+        [SerializeField, Range(0f, 1f)] private float jumpAnticipationMoveSpeedMultiplier = 0.2f;
+
         private bool isGrounded;
         private bool isTouchingWall;
         private bool isWallSliding;
 
         private float coyoteTimer;
         private float jumpBufferTimer;
+        private bool hasPendingNormalJump;
+        private float pendingNormalJumpTimer;
+        private float normalJumpAnticipationAge;
 
         private bool isDashing;
         private float dashTimer;
@@ -323,8 +330,11 @@ namespace Game.Player
         public bool IsHanging => isHanging;
         public bool IsWallSliding => isWallSliding;
         public int WallSide => wallSide;
+        public bool IsTouchingWall => isTouchingWall;
+        public bool IsPushingIntoWall => IsInputPushingIntoWall(wallSide);
         public bool IsCarrying => carriedObject != null;
         public bool IsSwinging => isSwinging;
+        public bool IsNormalJumpAnticipating => hasPendingNormalJump;
         public BarrelCarryable CarriedObject => carriedObject;
         public Vector2 Velocity => rb != null ? rb.velocity : Vector2.zero;
 
@@ -532,6 +542,8 @@ namespace Game.Player
             dashCooldownTimer -= Time.deltaTime;
             attackCooldownTimer -= Time.deltaTime;
 
+            UpdatePendingNormalJump();
+
             // Consume inputs
             bool jumpPressed = input.ConsumeJumpPressed();
             bool dashPressed = stats.hasDash && input.ConsumeDashPressed();
@@ -587,9 +599,9 @@ namespace Game.Player
                 TryInteract();
 
             // Jump normal (buffer + coyote)
-            if (jumpBufferTimer > 0f && coyoteTimer > 0f)
+            if (!hasPendingNormalJump && jumpBufferTimer > 0f && coyoteTimer > 0f)
             {
-                Jump();
+                StartPendingNormalJump();
                 jumpBufferTimer = 0f;
                 coyoteTimer = 0f;
             }
@@ -1120,6 +1132,8 @@ namespace Game.Player
             if (IsCarrying) stanceMult *= carryingMoveSpeedMultiplier;
 
             float targetSpeed = inputX * stats.maxRunSpeed * stanceMult;
+            if (hasPendingNormalJump)
+                targetSpeed *= jumpAnticipationMoveSpeedMultiplier;
 
             float accel = isGrounded ? stats.groundAcceleration : stats.airAcceleration;
             float decel = isGrounded ? stats.groundDeceleration : stats.airDeceleration;
@@ -1171,6 +1185,49 @@ namespace Game.Player
         {
             float jumpForce = stats.jumpForce * (IsCarrying ? carryingJumpForceMultiplier : 1f);
             rb.velocity = new Vector2(rb.velocity.x, jumpForce);
+        }
+
+        private void StartPendingNormalJump()
+        {
+            animDriver?.TriggerJumpStart();
+
+            if (jumpStartDelay <= 0f)
+            {
+                Jump();
+                return;
+            }
+
+            hasPendingNormalJump = true;
+            pendingNormalJumpTimer = jumpStartDelay;
+            normalJumpAnticipationAge = 0f;
+        }
+
+        private void UpdatePendingNormalJump()
+        {
+            if (!hasPendingNormalJump) return;
+
+            normalJumpAnticipationAge += Time.deltaTime;
+            if (!isGrounded)
+            {
+                hasPendingNormalJump = false;
+                pendingNormalJumpTimer = 0f;
+                animDriver?.CancelJumpStart();
+                return;
+            }
+
+            if (normalJumpAnticipationAge > 0f && input != null && !input.JumpHeld)
+            {
+                hasPendingNormalJump = false;
+                pendingNormalJumpTimer = 0f;
+                animDriver?.CancelJumpStart();
+                return;
+            }
+
+            pendingNormalJumpTimer -= Time.deltaTime;
+            if (pendingNormalJumpTimer > 0f) return;
+
+            hasPendingNormalJump = false;
+            Jump();
         }
 
         private void ApplyBetterJumpGravity()
@@ -1333,6 +1390,7 @@ namespace Game.Player
             int activeWallSide = wallSide != 0 ? wallSide : wallCoyoteSide;
             if (activeWallSide == 0)
                 activeWallSide = facingDir;
+            if (!IsInputPushingIntoWall(activeWallSide)) return;
 
             int jumpDir = -activeWallSide;
             int jumpedWallSide = activeWallSide;
@@ -1352,6 +1410,7 @@ namespace Game.Player
             wallCoyoteTimer = 0f;
             wallStickSide = 0;
             wallCoyoteSide = 0;
+            animDriver?.TriggerWallJumpStart();
             WallJumped?.Invoke(jumpedWallSide);
         }
 
@@ -1459,7 +1518,10 @@ namespace Game.Player
 
             if (isTouchingWall)
             {
-                if (lastWallJumpSide != 0 && wallSide != lastWallJumpSide)
+                bool touchingClearOppositeWall =
+                    (lastWallJumpSide == 1 && hasLeftWall && !hasRightWall) ||
+                    (lastWallJumpSide == -1 && hasRightWall && !hasLeftWall);
+                if (touchingClearOppositeWall)
                     ClearSameWallClimbBlock();
 
                 wallStickTimer = wallStickTime;
@@ -1480,6 +1542,16 @@ namespace Game.Player
                 if (wallCoyoteTimer <= 0f)
                     wallCoyoteSide = 0;
             }
+        }
+
+        private bool IsInputPushingIntoWall(int side)
+        {
+            if (input == null || side == 0) return false;
+
+            float inputX = Mathf.Clamp(input.MoveInput.x, -1f, 1f);
+            if (Mathf.Abs(inputX) < wallInputDeadzone) return false;
+
+            return Mathf.Sign(inputX) == side;
         }
 
         private bool TryGetWallHitOnSide(int side, out RaycastHit2D hit)
