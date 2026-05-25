@@ -52,9 +52,14 @@ namespace Game.Player
         [Header("Tuning (Designer) - Wall Feel")]
         [SerializeField, Range(0.1f, 3f)] private float wallSlideSpeedMultiplier = 0.35f;
         [SerializeField, Range(0.4f, 4f)] private float wallSlideTargetFallSpeed = 1.2f;
+        [SerializeField, Range(0f, 0.3f)] private float wallSlideExitFastFallTime = 0.10f;
+        [SerializeField, Range(0f, 20f)] private float wallSlideExitFastFallSpeed = 7f;
         [SerializeField, Range(0f, 0.3f)] private float wallStickTime = 0.08f;
         [SerializeField, Range(0f, 0.3f)] private float wallCoyoteTime = 0.14f;
         [SerializeField, Range(0.05f, 0.3f)] private float wallJumpLockTime = 0.10f;
+        [SerializeField, Range(0f, 0.3f)] private float wallJumpRegrabDelay = 0.12f;
+        [SerializeField, Range(0f, 2f)] private float narrowWallProbeDistance = 1.2f;
+        [SerializeField, Range(0.3f, 1f)] private float narrowWallJumpForceXMultiplier = 0.65f;
 
         [Header("Tuning (Designer) - Wall Input")]
         [SerializeField, Range(0.01f, 0.5f)] private float wallInputDeadzone = 0.2f;
@@ -73,6 +78,7 @@ namespace Game.Player
         [SerializeField, Range(-5f, 0f)] private float cornerForceFallSpeed = -1.2f;
         [SerializeField, Range(0.02f, 0.5f)] private float cornerStuckProbeDistance = 0.12f;
         [SerializeField, Range(0f, 1f)] private float cornerStuckHorizontalSpeedThreshold = 0.15f;
+        [SerializeField, Range(0f, 0.2f)] private float recentlyGroundedAntiStuckGraceTime = 0.08f;
         [SerializeField] private bool logCornerStuckDebug = false;
         [SerializeField] private Vector3[] cornerCorrectionOffsets =
         {
@@ -234,7 +240,7 @@ namespace Game.Player
         [SerializeField] private PlayerStealthKill stealthKill;
 
         [Header("Jump Anticipation")]
-        [SerializeField, Min(0f)] private float jumpStartDelay = 0.19f;
+        [SerializeField, Min(0f)] private float jumpStartDelay = 0f;
         [SerializeField, Range(0f, 1f)] private float jumpAnticipationMoveSpeedMultiplier = 0.2f;
 
         private bool isGrounded;
@@ -280,9 +286,12 @@ namespace Game.Player
         private int wallCoyoteSide;
         private float wallStickTimer;
         private float wallCoyoteTimer;
+        private float wallJumpRegrabTimer;
         private float wallDebugLogTimer;
         private float wallHitDebugLogTimer;
         private float wallSlideBlockDebugLogTimer;
+        private float wallSlideExitFastFallTimer;
+        private float recentlyGroundedTimer;
         private float cornerStuckTimer;
         private float cornerStuckDebugLogTimer;
         private bool suppressWallSlideThisFixed;
@@ -479,6 +488,9 @@ namespace Game.Player
             if (wallSlideBlockDebugLogTimer > 0f)
                 wallSlideBlockDebugLogTimer -= Time.deltaTime;
 
+            if (wallJumpRegrabTimer > 0f)
+                wallJumpRegrabTimer -= Time.deltaTime;
+
             if (cornerStuckDebugLogTimer > 0f)
                 cornerStuckDebugLogTimer -= Time.deltaTime;
 
@@ -645,6 +657,7 @@ namespace Game.Player
 
             suppressWallSlideThisFixed = false;
             CheckGround();
+            UpdateRecentlyGroundedTimer(Time.fixedDeltaTime);
             HandleCornerAntiStuck();
             HandleWallSlide();
             LogWallDebugState();
@@ -1238,6 +1251,16 @@ namespace Game.Player
             if (vy < stats.maxFallSpeed)
                 rb.velocity = new Vector2(rb.velocity.x, stats.maxFallSpeed);
 
+            if (wallSlideExitFastFallTimer > 0f)
+            {
+                wallSlideExitFastFallTimer = Mathf.Max(0f, wallSlideExitFastFallTimer - Time.fixedDeltaTime);
+                float fastFallY = Mathf.Max(-Mathf.Abs(wallSlideExitFastFallSpeed), stats.maxFallSpeed);
+                if (rb.velocity.y > fastFallY)
+                    rb.velocity = new Vector2(rb.velocity.x, fastFallY);
+                rb.gravityScale = stats.gravityScale * stats.fallGravityMultiplier;
+                return;
+            }
+
             if (vy < -0.01f)
             {
                 rb.gravityScale = stats.gravityScale * stats.fallGravityMultiplier;
@@ -1304,6 +1327,8 @@ namespace Game.Player
         {
             float inputX = input != null ? Mathf.Clamp(input.MoveInput.x, -1f, 1f) : 0f;
             if (Mathf.Abs(inputX) < wallInputDeadzone) inputX = 0f;
+            float inputY = input != null ? Mathf.Clamp(input.MoveInput.y, -1f, 1f) : 0f;
+            if (Mathf.Abs(inputY) < wallInputDeadzone) inputY = 0f;
 
             if (suppressWallSlideThisFixed)
             {
@@ -1319,6 +1344,7 @@ namespace Game.Player
                 return;
             }
 
+            bool wasWallSliding = isWallSliding;
             isWallSliding = false;
 
             if (isGrounded)
@@ -1342,14 +1368,31 @@ namespace Game.Player
                 return;
             }
 
-            if (inputX == 0f || Mathf.Sign(inputX) != slideSide)
+            bool exitingAwayFromWall = inputX != 0f && Mathf.Sign(inputX) == -slideSide;
+            bool exitingDown = inputY < 0f;
+            if (wasWallSliding && (exitingAwayFromWall || exitingDown))
             {
-                LogWallSlideBlocked(inputX == 0f ? "input deadzone/zero" : "input not pushing into wall", inputX);
+                StartWallSlideExitFastFall();
+                LogWallSlideBlocked(exitingDown ? "voluntary exit down" : "voluntary exit away", inputX);
+                return;
+            }
+
+            if (!wasWallSliding && !IsInputPushingIntoWall(slideSide))
+            {
+                LogWallSlideBlocked(inputX == 0f ? "entry requires input" : "entry input not toward wall", inputX);
                 return;
             }
 
             isWallSliding = true;
             ApplyWallSlideVelocity();
+        }
+
+        private void StartWallSlideExitFastFall()
+        {
+            wallSlideExitFastFallTimer = wallSlideExitFastFallTime;
+            float fastFallY = Mathf.Max(-Mathf.Abs(wallSlideExitFastFallSpeed), stats.maxFallSpeed);
+            if (rb.velocity.y > fastFallY)
+                rb.velocity = new Vector2(rb.velocity.x, fastFallY);
         }
 
         private void ApplyWallSlideVelocity()
@@ -1385,20 +1428,23 @@ namespace Game.Player
         {
             if (suppressWallWhileDownHeld) return;
 
-            bool canWallJump = isWallSliding || wallCoyoteTimer > 0f;
+            bool canWallJump = isWallSliding;
             if (!canWallJump) return;
+            if (wallJumpRegrabTimer > 0f) return;
 
             int activeWallSide = wallSide != 0 ? wallSide : wallCoyoteSide;
             if (activeWallSide == 0)
                 activeWallSide = facingDir;
-            if (!IsInputPushingIntoWall(activeWallSide)) return;
 
             int jumpDir = -activeWallSide;
             int jumpedWallSide = activeWallSide;
             if (IsSameWallClimbBlocked(jumpedWallSide)) return;
 
             float jumpMult = IsCarrying ? carryingJumpForceMultiplier : 1f;
-            float jumpX = jumpDir * stats.wallJumpForceX * jumpMult;
+            float wallJumpForceX = stats.wallJumpForceX;
+            if (TryGetWallHitOnSide(jumpDir, narrowWallProbeDistance, out _))
+                wallJumpForceX *= narrowWallJumpForceXMultiplier;
+            float jumpX = jumpDir * wallJumpForceX * jumpMult;
             float keptMomentumX = Mathf.Max(0f, rb.velocity.x * jumpDir) * stats.wallJumpMomentumKeep * jumpDir;
             rb.velocity = new Vector2(jumpX + keptMomentumX, stats.wallJumpForceY * jumpMult);
 
@@ -1407,6 +1453,7 @@ namespace Game.Player
             lastWallJumpSide = jumpedWallSide;
             lastWallJumpY = rb.position.y;
             wallJumpLockTimer = wallJumpLockTime;
+            wallJumpRegrabTimer = wallJumpRegrabDelay;
             wallStickTimer = 0f;
             wallCoyoteTimer = 0f;
             wallStickSide = 0;
@@ -1463,6 +1510,17 @@ namespace Game.Player
             }
         }
 
+        private void UpdateRecentlyGroundedTimer(float deltaTime)
+        {
+            if (isGrounded)
+            {
+                recentlyGroundedTimer = recentlyGroundedAntiStuckGraceTime;
+                return;
+            }
+
+            recentlyGroundedTimer = Mathf.Max(0f, recentlyGroundedTimer - deltaTime);
+        }
+
         private void CheckWall(float inputYClean)
         {
             if (capsule == null) return;
@@ -1497,17 +1555,22 @@ namespace Game.Player
 
             bool hasRightWall = TryGetWallHitOnSide(1, out _);
             bool hasLeftWall = TryGetWallHitOnSide(-1, out _);
+            int previousWallSide = wallSide;
 
             isTouchingWall = false;
             wallSide = 0;
 
             if (hasRightWall && hasLeftWall)
             {
+                isTouchingWall = true;
                 if (inputX != 0f)
-                {
-                    isTouchingWall = true;
                     wallSide = (int)Mathf.Sign(inputX);
-                }
+                else if (previousWallSide != 0)
+                    wallSide = previousWallSide;
+                else if (wallCoyoteSide != 0)
+                    wallSide = wallCoyoteSide;
+                else
+                    wallSide = facingDir;
             }
             else if (hasRightWall)
             {
@@ -1560,6 +1623,11 @@ namespace Game.Player
 
         private bool TryGetWallHitOnSide(int side, out RaycastHit2D hit)
         {
+            return TryGetWallHitOnSide(side, wallCheckDistance, out hit);
+        }
+
+        private bool TryGetWallHitOnSide(int side, float distance, out RaycastHit2D hit)
+        {
             hit = default;
             if (side == 0 || capsule == null) return false;
 
@@ -1569,7 +1637,7 @@ namespace Game.Player
             filter.useLayerMask = true;
             filter.useTriggers = false;
 
-            int hitCount = capsule.Cast(dir, filter, wallHits, wallCheckDistance);
+            int hitCount = capsule.Cast(dir, filter, wallHits, Mathf.Max(0f, distance));
             for (int i = 0; i < hitCount; i++)
             {
                 RaycastHit2D candidate = wallHits[i];
@@ -1612,6 +1680,12 @@ namespace Game.Player
             }
 
             if (isGrounded || isHanging || isSwinging || isDashing)
+            {
+                cornerStuckTimer = 0f;
+                return;
+            }
+
+            if (recentlyGroundedTimer > 0f)
             {
                 cornerStuckTimer = 0f;
                 return;

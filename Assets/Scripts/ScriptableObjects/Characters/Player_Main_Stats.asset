@@ -15,16 +15,16 @@ MonoBehaviour:
   maxRunSpeed: 7
   groundAcceleration: 90
   groundDeceleration: 110
-  airAcceleration: 55
-  airDeceleration: 35
-  turnAccelerationMultiplier: 1.35
+  airAcceleration: 62
+  airDeceleration: 28
+  turnAccelerationMultiplier: 1.5
   jumpForce: 15
   gravityScale: 1
-  fallGravityMultiplier: 2.2
-  apexGravityMultiplier: 0.9
-  apexThreshold: 1
-  jumpCutMultiplier: 0.5
-  maxFallSpeed: -25
+  fallGravityMultiplier: 2.6
+  apexGravityMultiplier: 0.75
+  apexThreshold: 1.25
+  jumpCutMultiplier: 0.45
+  maxFallSpeed: -28
   coyoteTime: 0.1
   jumpBufferTime: 0.05
   hasDash: 1
@@ -35,7 +35,7 @@ MonoBehaviour:
   airDashesMax: 1
   wallSlideSpeed: -2
   wallSlideAcceleration: 20
-  wallJumpForceX: 8.5
-  wallJumpForceY: 8
-  wallJumpMomentumKeep: 0.25
-  wallJumpLockTime: 0.1
+  wallJumpForceX: 13.5
+  wallJumpForceY: 10.5
+  wallJumpMomentumKeep: 0.65
+  wallJumpLockTime: 0.05
