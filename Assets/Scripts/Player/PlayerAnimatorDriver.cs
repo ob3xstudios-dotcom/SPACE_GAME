@@ -14,6 +14,7 @@ namespace Game.Player
         [SerializeField] private string vyParam = "Vy";
         [SerializeField] private string hangingParam = "Hanging";
         [SerializeField] private string wallSlidingParam = "WallSliding";
+        [SerializeField] private string wallSlideEdgeParam = "WallSlideEdge";
         [SerializeField] private string wallSideParam = "WallSide";
 
         [Header("Jump Params")]
@@ -22,10 +23,10 @@ namespace Game.Player
         [SerializeField] private string jumpStartStateName = "Monkey_JumpStart";
         [SerializeField] private string wallImpactTrigger = "WallImpact";
         [SerializeField] private string wallJumpStartTrigger = "WallJumpStart";
-        [SerializeField] private string wallImpactStateName = "Monkey_WallImpact";
-        [SerializeField] private string wallSlideStateName = "Monkey_WallSlide";
-        [SerializeField] private string wallJumpStartStateName = "Monkey_WallJumpStart";
-        [SerializeField] private string jumpEndStateName = "Base Layer.Locomotion.Monkey_JumpEnd";
+        [SerializeField] private string wallImpactStateName = "Base Layer.Monkey_WallImpact";
+        [SerializeField] private string wallSlideStateName = "Base Layer.Monkey_WallSlide";
+        [SerializeField] private string wallJumpStartStateName = "Base Layer.Monkey_WallJumpStart";
+        [SerializeField] private string jumpEndStateName = "Base Layer.Monkey_JumpEnd";
         [SerializeField] private string idleStateName = "Base Layer.Locomotion.Monkey_Idle";
         [SerializeField] private string runStateName = "Base Layer.Locomotion.Monkey_Run";
         [SerializeField] private string fallingStateName = "Base Layer.Locomotion.Monkey_Falling";
@@ -53,14 +54,15 @@ namespace Game.Player
         private Rigidbody2D rb;
 
         private int speedHash, runAnimSpeedHash, groundedHash, vyHash, hangingHash;
-        private int wallSlidingHash, wallSideHash;
+        private int wallSlidingHash, wallSlideEdgeHash, wallSideHash;
         private int jumpStartHash, jumpEndHash, wallImpactHash, wallJumpStartHash;
         private int attackTrigHash, attackDirHash;
         private int parryTrigHash;
         private int crouchHash, layDownHash;
-        private bool hasWallSlidingParam, hasWallSideParam, hasJumpStartParam, hasJumpEndParam;
+        private bool hasWallSlidingParam, hasWallSlideEdgeParam, hasWallSideParam, hasJumpStartParam, hasJumpEndParam;
         private bool hasWallImpactParam, hasWallJumpStartParam;
         private bool hasGroundedSample, wasGrounded, wasTouchingWall, wasWallSliding;
+        private bool wallSlideEdgeLatched;
         private float jumpEndVisualLockTimer;
 
         private int cachedAttackDir = 0;
@@ -77,6 +79,7 @@ namespace Game.Player
             vyHash = Animator.StringToHash(vyParam);
             hangingHash = Animator.StringToHash(hangingParam);
             wallSlidingHash = Animator.StringToHash(wallSlidingParam);
+            wallSlideEdgeHash = Animator.StringToHash(wallSlideEdgeParam);
             wallSideHash = Animator.StringToHash(wallSideParam);
             jumpStartHash = Animator.StringToHash(jumpStartTrigger);
             jumpEndHash = Animator.StringToHash(jumpEndTrigger);
@@ -92,6 +95,7 @@ namespace Game.Player
             layDownHash = Animator.StringToHash(layDownBool);
 
             hasWallSlidingParam = HasAnimatorParameter(wallSlidingHash, AnimatorControllerParameterType.Bool);
+            hasWallSlideEdgeParam = HasAnimatorParameter(wallSlideEdgeHash, AnimatorControllerParameterType.Bool);
             hasWallSideParam = HasAnimatorParameter(wallSideHash, AnimatorControllerParameterType.Int);
             hasJumpStartParam = HasAnimatorParameter(jumpStartHash, AnimatorControllerParameterType.Trigger);
             hasJumpEndParam = HasAnimatorParameter(jumpEndHash, AnimatorControllerParameterType.Trigger);
@@ -131,6 +135,17 @@ namespace Game.Player
 
             if (hasWallSlidingParam)
                 anim.SetBool(wallSlidingHash, isWallSliding);
+            if (hasWallSlideEdgeParam)
+            {
+                bool isLosingContact = controller != null && controller.IsWallLosingContact;
+                if (!isWallSliding)
+                    wallSlideEdgeLatched = false;
+                else if (isLosingContact)
+                    wallSlideEdgeLatched = true;
+
+                bool wallSlideEdge = isWallSliding && wallSlideEdgeLatched;
+                anim.SetBool(wallSlideEdgeHash, wallSlideEdge);
+            }
             if (hasWallSideParam)
                 anim.SetInteger(wallSideHash, !isGrounded && controller != null ? controller.WallSide : 0);
             UpdateWallAnimations(isGrounded, isTouchingWall, isWallSliding, isPushingIntoWall);
@@ -211,7 +226,14 @@ namespace Game.Player
             if (jumpEndVisualLockTimer > 0f && stateName != jumpEndStateName)
                 return;
 
-            anim.Play(stateName, 0, 0f);
+            int stateHash = Animator.StringToHash(stateName);
+            if (!anim.HasState(0, stateHash))
+            {
+                Debug.LogWarning($"Animator state not found on layer 0: {stateName}", this);
+                return;
+            }
+
+            anim.Play(stateHash, 0, 0f);
         }
 
         public void TriggerJumpStart()

@@ -60,10 +60,11 @@ namespace Game.Player
         [SerializeField, Range(0f, 0.3f)] private float wallJumpRegrabDelay = 0.12f;
         [SerializeField, Range(0f, 2f)] private float narrowWallProbeDistance = 1.2f;
         [SerializeField, Range(0.3f, 1f)] private float narrowWallJumpForceXMultiplier = 0.65f;
+        [SerializeField, Range(0f, 1f)] private float wallSlideEdgeVisibleFractionThreshold = 0.5f;
 
         [Header("Tuning (Designer) - Wall Input")]
         [SerializeField, Range(0.01f, 0.5f)] private float wallInputDeadzone = 0.2f;
-        [SerializeField, Range(0.01f, 0.2f)] private float facingInputDeadzone = 0.05f;
+        [SerializeField, Range(0.01f, 0.2f)] private float facingInputDeadzone = 0.15f;
         [SerializeField] private bool requirePushIntoWallForSlide = true;
 
         [Header("Wall Debug Temporal")]
@@ -246,6 +247,13 @@ namespace Game.Player
         private bool isGrounded;
         private bool isTouchingWall;
         private bool isWallSliding;
+        private bool isWallLosingContact;
+        private RaycastHit2D wallSlideVisualHit;
+        private Collider2D wallSlideVisualCollider;
+        private int wallSlideVisualSide;
+        private bool wallSlideVisualHasEdge;
+        private float wallSlideVisualEdgeY;
+        private float wallSlideVisualVisibleFraction = 1f;
 
         private float coyoteTimer;
         private float jumpBufferTimer;
@@ -264,6 +272,7 @@ namespace Game.Player
         private readonly Collider2D[] attackHits = new Collider2D[16];
         private readonly RaycastHit2D[] groundHits = new RaycastHit2D[8];
         private readonly RaycastHit2D[] wallHits = new RaycastHit2D[8];
+        private readonly RaycastHit2D[] wallEdgeHits = new RaycastHit2D[8];
         private readonly Collider2D[] cornerCorrectionHits = new Collider2D[8];
         private readonly HashSet<UnityEngine.Object> attackDamageTargets = new HashSet<UnityEngine.Object>();
         private readonly List<IInteractable> interactablesInRange = new List<IInteractable>();
@@ -282,6 +291,7 @@ namespace Game.Player
         private float cancelEnableTimer;
 
         private int wallSide;
+        private bool hasNarrowWallContact;
         private int wallStickSide;
         private int wallCoyoteSide;
         private float wallStickTimer;
@@ -326,6 +336,10 @@ namespace Game.Player
         private Collider2D lastTopGroundDebugCollider;
         private int lastWallJumpSide;
         private float lastWallJumpY;
+        private Collider2D lastWallJumpCollider;
+        private Collider2D sameWallClimbCollider;
+        private int sameWallClimbSide;
+        private float sameWallClimbCeilingY;
 
         private RigidbodyType2D cachedBodyType;
         private RigidbodyConstraints2D cachedConstraints;
@@ -338,6 +352,7 @@ namespace Game.Player
         public bool IsAttacking => isAttacking;
         public bool IsHanging => isHanging;
         public bool IsWallSliding => isWallSliding;
+        public bool IsWallLosingContact => isWallSliding && isWallLosingContact;
         public int WallSide => wallSide;
         public bool IsTouchingWall => isTouchingWall;
         public bool IsPushingIntoWall => IsInputPushingIntoWall(wallSide);
@@ -372,8 +387,7 @@ namespace Game.Player
             wallCoyoteSide = 0;
             ledgeGrabCooldownTimer = 0f;
             ledgeCandidateTimer = 0f;
-            lastWallJumpSide = 0;
-            lastWallJumpY = 0f;
+            ClearSameWallClimbBlock();
             parryMoveLockTimer = 0f;
             attackStateTimer = 0f;
             cancelEnableTimer = 0f;
@@ -660,6 +674,7 @@ namespace Game.Player
             UpdateRecentlyGroundedTimer(Time.fixedDeltaTime);
             HandleCornerAntiStuck();
             HandleWallSlide();
+            UpdateWallSlideEdgeVisual(Time.fixedDeltaTime);
             LogWallDebugState();
 
             // ✅ Parry move lock: no Move()
@@ -1368,6 +1383,14 @@ namespace Game.Player
                 return;
             }
 
+            Collider2D slideWallCollider = GetWallColliderOnSide(slideSide);
+            bool sameWallClimbBlocked = IsSameWallClimbBlocked(slideSide, slideWallCollider);
+            if (sameWallClimbBlocked)
+            {
+                LogWallSlideBlocked("same wall climb blocked", inputX);
+                return;
+            }
+
             bool exitingAwayFromWall = inputX != 0f && Mathf.Sign(inputX) == -slideSide;
             bool exitingDown = inputY < 0f;
             if (wasWallSliding && (exitingAwayFromWall || exitingDown))
@@ -1410,6 +1433,107 @@ namespace Game.Player
             }
         }
 
+        private void UpdateWallSlideEdgeVisual(float deltaTime)
+        {
+            isWallLosingContact = false;
+            float visibleHeight = float.PositiveInfinity;
+            bool edgeBelowCenter = false;
+            float edgeY = wallSlideVisualEdgeY;
+
+            if (!isWallSliding || wallSide == 0 || capsule == null)
+            {
+                wallSlideVisualHasEdge = false;
+                wallSlideVisualVisibleFraction = 1f;
+                return;
+            }
+
+            if (wallSlideVisualCollider != null && wallSlideVisualSide == wallSide && !wallSlideVisualHasEdge)
+                wallSlideVisualHasEdge = TryFindCurrentWallLowerEdge(out wallSlideVisualEdgeY);
+            edgeY = wallSlideVisualEdgeY;
+
+            if (wallSlideVisualHasEdge)
+            {
+                Bounds bounds = capsule.bounds;
+                edgeBelowCenter = edgeY <= bounds.center.y;
+                if (edgeBelowCenter)
+                {
+                    visibleHeight = bounds.max.y - edgeY;
+                    wallSlideVisualVisibleFraction = Mathf.Clamp01(
+                        visibleHeight / Mathf.Max(bounds.size.y, 0.0001f)
+                    );
+                    isWallLosingContact = wallSlideVisualVisibleFraction <= wallSlideEdgeVisibleFractionThreshold;
+                }
+                else
+                {
+                    wallSlideVisualVisibleFraction = 1f;
+                }
+            }
+            else
+            {
+                wallSlideVisualVisibleFraction = 1f;
+            }
+        }
+
+        private bool TryFindCurrentWallLowerEdge(out float edgeY)
+        {
+            const float inwardSkin = 0.02f;
+            const float verticalSearchMargin = 0.25f;
+            const float minHitDistance = 0.001f;
+            const float lowerEdgeNormalMinY = 0.5f;
+            const float edgeWallProbeYOffset = 0.03f;
+
+            edgeY = 0f;
+            if (wallSlideVisualCollider == null || wallSlideVisualSide == 0) return false;
+
+            Bounds bounds = capsule.bounds;
+            Vector2 wallDirection = wallSlideVisualSide > 0 ? Vector2.right : Vector2.left;
+            Vector2 origin = new Vector2(
+                wallSlideVisualHit.point.x + wallDirection.x * inwardSkin,
+                bounds.min.y - verticalSearchMargin
+            );
+            float distance = bounds.size.y + verticalSearchMargin * 2f;
+
+            int hitCount = Physics2D.RaycastNonAlloc(
+                origin,
+                Vector2.up,
+                wallEdgeHits,
+                distance,
+                SolidMask()
+            );
+
+            bool found = false;
+            float lowestEdgeY = float.PositiveInfinity;
+            for (int i = 0; i < hitCount; i++)
+            {
+                RaycastHit2D candidate = wallEdgeHits[i];
+                if (candidate.collider != wallSlideVisualCollider) continue;
+                if (candidate.collider.isTrigger) continue;
+                if (candidate.distance <= minHitDistance) continue;
+                if (candidate.normal.y > -lowerEdgeNormalMinY) continue;
+                Vector2 wallProbeOrigin = new Vector2(
+                    wallSlideVisualHit.point.x - wallDirection.x * inwardSkin,
+                    candidate.point.y + edgeWallProbeYOffset
+                );
+                RaycastHit2D wallProbeHit = Physics2D.Raycast(
+                    wallProbeOrigin,
+                    wallDirection,
+                    inwardSkin * 3f,
+                    SolidMask()
+                );
+                if (wallProbeHit.collider != wallSlideVisualCollider) continue;
+                if (!IsValidWallNormalForSide(wallProbeHit.normal, wallSlideVisualSide)) continue;
+                if (candidate.point.y >= lowestEdgeY) continue;
+
+                lowestEdgeY = candidate.point.y;
+                found = true;
+            }
+
+            if (!found) return false;
+
+            edgeY = lowestEdgeY;
+            return true;
+        }
+
         private void LogWallSlideBlocked(string reason, float inputX)
         {
             if (!logWallDebug) return;
@@ -1438,7 +1562,8 @@ namespace Game.Player
 
             int jumpDir = -activeWallSide;
             int jumpedWallSide = activeWallSide;
-            if (IsSameWallClimbBlocked(jumpedWallSide)) return;
+            Collider2D jumpedWallCollider = GetWallColliderOnSide(jumpedWallSide);
+            if (IsSameWallClimbBlocked(jumpedWallSide, jumpedWallCollider)) return;
 
             float jumpMult = IsCarrying ? carryingJumpForceMultiplier : 1f;
             float wallJumpForceX = stats.wallJumpForceX;
@@ -1452,6 +1577,8 @@ namespace Game.Player
 
             lastWallJumpSide = jumpedWallSide;
             lastWallJumpY = rb.position.y;
+            lastWallJumpCollider = jumpedWallCollider;
+            RegisterSameWallClimbCeiling(jumpedWallSide, lastWallJumpCollider);
             wallJumpLockTimer = wallJumpLockTime;
             wallJumpRegrabTimer = wallJumpRegrabDelay;
             wallStickTimer = 0f;
@@ -1530,6 +1657,7 @@ namespace Game.Player
             {
                 isTouchingWall = false;
                 wallSide = 0;
+                hasNarrowWallContact = false;
                 wallStickTimer = 0f;
                 wallCoyoteTimer = 0f;
                 wallStickSide = 0;
@@ -1542,6 +1670,7 @@ namespace Game.Player
                 isTouchingWall = false;
                 isWallSliding = false;
                 wallSide = 0;
+                hasNarrowWallContact = false;
                 wallStickTimer = 0f;
                 wallCoyoteTimer = 0f;
                 wallStickSide = 0;
@@ -1553,8 +1682,9 @@ namespace Game.Player
             float inputX = Mathf.Clamp(input.MoveInput.x, -1f, 1f);
             if (Mathf.Abs(inputX) < wallInputDeadzone) inputX = 0f;
 
-            bool hasRightWall = TryGetWallHitOnSide(1, out _);
-            bool hasLeftWall = TryGetWallHitOnSide(-1, out _);
+            bool hasRightWall = TryGetWallHitOnSide(1, out RaycastHit2D rightWallHit);
+            bool hasLeftWall = TryGetWallHitOnSide(-1, out RaycastHit2D leftWallHit);
+            hasNarrowWallContact = hasRightWall && hasLeftWall;
             int previousWallSide = wallSide;
 
             isTouchingWall = false;
@@ -1583,24 +1713,28 @@ namespace Game.Player
                 wallSide = -1;
             }
 
+            if (isTouchingWall && wallSide != 0)
+            {
+                RaycastHit2D selectedWallHit = wallSide > 0 ? rightWallHit : leftWallHit;
+                UpdateWallSlideVisualReference(selectedWallHit, wallSide);
+            }
+
             if (isTouchingWall)
             {
-                bool touchingClearOppositeWall =
-                    (lastWallJumpSide == 1 && hasLeftWall && !hasRightWall) ||
-                    (lastWallJumpSide == -1 && hasRightWall && !hasLeftWall);
-                if (touchingClearOppositeWall)
-                    ClearSameWallClimbBlock();
-
                 wallStickTimer = wallStickTime;
                 wallCoyoteTimer = wallCoyoteTime;
                 wallStickSide = wallSide;
                 wallCoyoteSide = wallSide;
+
+                if (wallSide != 0)
+                {
+                    Collider2D selectedWallCollider = GetWallColliderOnSide(wallSide);
+                    if (IsValidOppositeWallForClimbReset(wallSide, selectedWallCollider))
+                        ClearSameWallClimbBlock();
+                }
             }
             else
             {
-                if (lastWallJumpSide != 0 && rb.position.y < lastWallJumpY - sameWallJumpYReleaseMargin)
-                    ClearSameWallClimbBlock();
-
                 wallStickTimer = Mathf.Max(0f, wallStickTimer - Time.deltaTime);
                 wallCoyoteTimer = Mathf.Max(0f, wallCoyoteTimer - Time.deltaTime);
                 wallStickTimer = 0f;
@@ -1609,6 +1743,19 @@ namespace Game.Player
                 if (wallCoyoteTimer <= 0f)
                     wallCoyoteSide = 0;
             }
+        }
+
+        private void UpdateWallSlideVisualReference(RaycastHit2D wallHit, int side)
+        {
+            if (wallHit.collider != wallSlideVisualCollider || side != wallSlideVisualSide)
+            {
+                wallSlideVisualHasEdge = false;
+                wallSlideVisualVisibleFraction = 1f;
+            }
+
+            wallSlideVisualHit = wallHit;
+            wallSlideVisualCollider = wallHit.collider;
+            wallSlideVisualSide = side;
         }
 
         private bool IsInputPushingIntoWall(int side)
@@ -1835,14 +1982,54 @@ namespace Game.Player
         {
             if (!preventSameWallClimb) return false;
             if (lastWallJumpSide == 0 || side == 0) return false;
-            if (side != lastWallJumpSide) return false;
-            return rb.position.y >= lastWallJumpY - sameWallJumpYReleaseMargin;
+            bool verticalBlockActive = rb.position.y >= lastWallJumpY - sameWallJumpYReleaseMargin;
+            if (!verticalBlockActive) return false;
+            if (side == lastWallJumpSide) return true;
+            return hasNarrowWallContact && side == -lastWallJumpSide;
         }
 
         private void ClearSameWallClimbBlock()
         {
             lastWallJumpSide = 0;
             lastWallJumpY = 0f;
+            lastWallJumpCollider = null;
+            sameWallClimbCollider = null;
+            sameWallClimbSide = 0;
+            sameWallClimbCeilingY = 0f;
+        }
+
+        private bool IsSameWallClimbBlocked(int side, Collider2D wallCollider)
+        {
+            const float sameWallJumpYReleaseEpsilon = 0.05f;
+
+            if (!preventSameWallClimb) return false;
+            if (sameWallClimbSide == 0 || side == 0) return false;
+            if (side != sameWallClimbSide) return false;
+            if (wallCollider == null || wallCollider != sameWallClimbCollider) return false;
+            return rb.position.y >= sameWallClimbCeilingY - sameWallJumpYReleaseEpsilon;
+        }
+
+        private Collider2D GetWallColliderOnSide(int side)
+        {
+            return TryGetWallHitOnSide(side, out RaycastHit2D wallHit)
+                ? wallHit.collider
+                : null;
+        }
+
+        private void RegisterSameWallClimbCeiling(int jumpedWallSide, Collider2D jumpedCollider)
+        {
+            if (jumpedWallSide == 0 || jumpedCollider == null) return;
+            if (sameWallClimbSide == jumpedWallSide && sameWallClimbCollider == jumpedCollider) return;
+
+            sameWallClimbSide = jumpedWallSide;
+            sameWallClimbCollider = jumpedCollider;
+            sameWallClimbCeilingY = rb.position.y;
+        }
+
+        private bool IsValidOppositeWallForClimbReset(int side, Collider2D wallCollider)
+        {
+            if (sameWallClimbSide == 0 || wallCollider == null) return false;
+            return side == -sameWallClimbSide && wallCollider != sameWallClimbCollider;
         }
 
         private int SolidMask()
