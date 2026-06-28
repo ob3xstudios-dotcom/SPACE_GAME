@@ -65,6 +65,7 @@ namespace Game.Player
         [Header("Tuning (Designer) - Wall Input")]
         [SerializeField, Range(0.01f, 0.5f)] private float wallInputDeadzone = 0.2f;
         [SerializeField, Range(0.01f, 0.2f)] private float facingInputDeadzone = 0.15f;
+        [SerializeField, Range(0.2f, 1f)] private float airborneFacingInputThreshold = 0.55f;
         [SerializeField] private bool requirePushIntoWallForSlide = true;
 
         [Header("Wall Debug Temporal")]
@@ -547,7 +548,8 @@ namespace Game.Player
             }
 
             // Flip por movimiento (si no está lockeado por parry)
-            if (!IsMoveLockedByParry && Mathf.Abs(rawInputX) >= facingInputDeadzone)
+            float facingThreshold = isGrounded ? facingInputDeadzone : airborneFacingInputThreshold;
+            if (!IsMoveLockedByParry && Mathf.Abs(rawInputX) >= facingThreshold)
                 ApplyFacing((int)Mathf.Sign(rawInputX));
 
             CheckGround();
@@ -1218,6 +1220,7 @@ namespace Game.Player
 
         private void StartPendingNormalJump()
         {
+            ApplyJumpInputFacing();
             animDriver?.TriggerJumpStart();
 
             if (jumpStartDelay <= 0f)
@@ -1229,6 +1232,15 @@ namespace Game.Player
             hasPendingNormalJump = true;
             pendingNormalJumpTimer = jumpStartDelay;
             normalJumpAnticipationAge = 0f;
+        }
+
+        private void ApplyJumpInputFacing()
+        {
+            if (input == null || IsMoveLockedByParry) return;
+
+            float inputX = Mathf.Clamp(input.MoveInput.x, -1f, 1f);
+            if (Mathf.Abs(inputX) >= facingInputDeadzone)
+                ApplyFacing((int)Mathf.Sign(inputX));
         }
 
         private void UpdatePendingNormalJump()
