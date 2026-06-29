@@ -107,22 +107,23 @@ namespace Game.Player
         {
             float speedX = Mathf.Abs(rb.velocity.x);
             float vy = rb.velocity.y;
+            bool isGrounded = controller != null && controller.IsGrounded;
+            float visualSpeedX = GetVisualSpeedX(speedX, isGrounded);
             float maxRunSpeed = controller != null && controller.stats != null
                 ? controller.stats.maxRunSpeed
                 : 0f;
             float runAnimSpeed = maxRunSpeed > 0.01f
-                ? Mathf.Clamp(speedX / maxRunSpeed, minRunAnimSpeed, maxRunAnimSpeed)
+                ? Mathf.Clamp(visualSpeedX / maxRunSpeed, minRunAnimSpeed, maxRunAnimSpeed)
                 : 1f;
 
             if (jumpEndVisualLockTimer > 0f)
                 jumpEndVisualLockTimer = Mathf.Max(0f, jumpEndVisualLockTimer - Time.deltaTime);
 
-            anim.SetFloat(speedHash, speedX > movingThreshold ? speedX : 0f);
+            anim.SetFloat(speedHash, visualSpeedX > movingThreshold ? visualSpeedX : 0f);
             anim.SetFloat(runAnimSpeedHash, runAnimSpeed);
             anim.SetFloat(vyHash, vy);
 
             // ✅ Requiere que PlayerController exponga estas props
-            bool isGrounded = controller != null && controller.IsGrounded;
             bool isTouchingWall = !isGrounded && controller != null && controller.IsTouchingWall;
             bool isWallSliding = !isGrounded && controller != null && controller.IsWallSliding;
             bool isPushingIntoWall = !isGrounded && controller != null && controller.IsPushingIntoWall;
@@ -159,6 +160,16 @@ namespace Game.Player
             }
 
             anim.SetInteger(attackDirHash, cachedAttackDir);
+        }
+
+        private float GetVisualSpeedX(float speedX, bool isGrounded)
+        {
+            var input = controller != null ? controller.input : null;
+            float inputX = input != null ? Mathf.Abs(input.MoveInput.x) : speedX;
+            if (isGrounded && inputX <= movingThreshold)
+                return 0f;
+
+            return speedX;
         }
 
         private bool HasAnimatorParameter(int hash, AnimatorControllerParameterType type)
@@ -277,9 +288,10 @@ namespace Game.Player
                 anim.ResetTrigger(jumpEndHash);
 
             bool isGrounded = controller != null && controller.IsGrounded;
+            float visualSpeedX = GetVisualSpeedX(Mathf.Abs(rb.velocity.x), isGrounded);
             string targetState = !isGrounded
                 ? fallingStateName
-                : Mathf.Abs(rb.velocity.x) > movingThreshold ? runStateName : idleStateName;
+                : visualSpeedX > movingThreshold ? runStateName : idleStateName;
             PlayManual(targetState);
         }
 

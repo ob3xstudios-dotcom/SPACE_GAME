@@ -40,6 +40,8 @@ namespace Game.World
         private float playerInRangeTimer;
 
         public int FacingDirection => (int)facingWhenHanging;
+        public Transform HangTransform => hangPoint;
+        public Transform StandTransform => standPoint;
         public Vector2 HangPosition => hangPoint != null ? hangPoint.position : transform.position;
         public bool HasStandPosition => standPoint != null;
         public Vector2 StandPosition => standPoint != null ? standPoint.position : HangPosition;

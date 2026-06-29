@@ -251,6 +251,7 @@ namespace Game.Player
         private bool isWallLosingContact;
         private RaycastHit2D wallSlideVisualHit;
         private Collider2D wallSlideVisualCollider;
+        private HorizontalMovingPlatform currentGroundPlatform;
         private int wallSlideVisualSide;
         private bool wallSlideVisualHasEdge;
         private float wallSlideVisualEdgeY;
@@ -319,6 +320,7 @@ namespace Game.Player
         private Vector2 ledgeCandidateHangPos;
         private Vector2 ledgeCandidateCorner;
         private int ledgeCandidateSide;
+        private LedgeGrabPoint activeLedgePoint;
         private Vector2 ledgeDebugWallStart;
         private Vector2 ledgeDebugWallEnd;
         private Vector2 ledgeDebugHeadStart;
@@ -692,6 +694,7 @@ namespace Game.Player
             ApplyBetterJumpGravity();
             if (isWallSliding)
                 ApplyWallSlideVelocity();
+            ApplyMovingPlatformDelta();
         }
 
         // --------------------
@@ -916,7 +919,7 @@ namespace Game.Player
             if (!CanEnterLedgeGrabPoint(point)) return false;
 
             ApplyFacing(point.FacingDirection);
-            EnterHang(point.HangPosition, point.CornerPosition, point.HasStandPosition, point.StandPosition);
+            EnterHang(point.HangPosition, point.CornerPosition, point.HasStandPosition, point.StandPosition, point);
             return true;
         }
 
@@ -1641,12 +1644,26 @@ namespace Game.Player
             }
 
             isGrounded = bestHit.collider != null;
+            currentGroundPlatform = isGrounded
+                ? bestHit.collider.GetComponentInParent<HorizontalMovingPlatform>()
+                : null;
 
             if (logLedgeDebug && bestHit.collider != lastGroundDebugCollider)
             {
                 lastGroundDebugCollider = bestHit.collider;
                 Debug.Log($"[GROUND DEBUG] grounded={isGrounded} hit={DescribeCollider2D(bestHit.collider)} point={bestHit.point} normal={bestHit.normal}");
             }
+        }
+
+        private void ApplyMovingPlatformDelta()
+        {
+            if (!isGrounded || currentGroundPlatform == null) return;
+
+            Vector2 delta = currentGroundPlatform.LastDelta;
+            if (delta.sqrMagnitude <= 0f) return;
+
+            rb.position += delta;
+            transform.position = rb.position;
         }
 
         private void UpdateRecentlyGroundedTimer(float deltaTime)
@@ -2343,11 +2360,17 @@ namespace Game.Player
 
         private void EnterHang(Vector2 lockedPos, Vector2 corner, bool hasClimbPosition, Vector2 climbPosition)
         {
+            EnterHang(lockedPos, corner, hasClimbPosition, climbPosition, null);
+        }
+
+        private void EnterHang(Vector2 lockedPos, Vector2 corner, bool hasClimbPosition, Vector2 climbPosition, LedgeGrabPoint sourcePoint)
+        {
             isHanging = true;
             isWallSliding = false;
             ledgeCandidateTimer = 0f;
             wallStickTimer = 0f;
             wallCoyoteTimer = 0f;
+            activeLedgePoint = sourcePoint;
             SetLedgeDebugFail("enter hang");
 
             cachedBodyType = rb.bodyType;
@@ -2378,6 +2401,7 @@ namespace Game.Player
             isHanging = false;
             isLedgeClimbing = false;
             hasClimbPositionLocked = false;
+            activeLedgePoint = null;
 
             rb.bodyType = cachedBodyType;
             rb.constraints = cachedConstraints;
@@ -2397,6 +2421,7 @@ namespace Game.Player
                 return;
             }
 
+            RefreshActiveLedgePositions();
             transform.position = hangPositionLocked;
             rb.velocity = Vector2.zero;
 
@@ -2415,6 +2440,8 @@ namespace Game.Player
             // Jump desde hang: OK (sale del hang)
             if (input.ConsumeJumpPressed())
             {
+                RefreshActiveLedgePositions();
+
                 if (hasClimbPositionLocked)
                 {
                     StartLedgeClimb(climbPositionLocked);
@@ -2440,6 +2467,20 @@ namespace Game.Player
                 SpendDashStamina();
                 StartDashOverride(new Vector2(dashDir, 0f));
                 return;
+            }
+        }
+
+        private void RefreshActiveLedgePositions()
+        {
+            if (activeLedgePoint == null) return;
+
+            if (activeLedgePoint.HangTransform != null)
+                hangPositionLocked = activeLedgePoint.HangPosition;
+
+            if (activeLedgePoint.StandTransform != null)
+            {
+                hasClimbPositionLocked = true;
+                climbPositionLocked = activeLedgePoint.StandPosition;
             }
         }
 
