@@ -10,6 +10,7 @@ GameObject:
   m_Component:
   - component: {fileID: 7255559028124229384}
   - component: {fileID: 1563846133112087534}
+  - component: {fileID: 6027141785794439701}
   m_Layer: 0
   m_Name: 'GameplayTilemaps '
   m_TagString: Untagged
@@ -46,6 +47,21 @@ Grid:
   m_CellGap: {x: 0, y: 0, z: 0}
   m_CellLayout: 0
   m_CellSwizzle: 0
+--- !u!114 &6027141785794439701
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 3947046546375755331}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: a4e44cce6485460ba5b20add74881164, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  showCollisionVisuals: 0
+  groundRenderer: {fileID: 6705639046666325876}
+  wallRenderer: {fileID: 7226318103025701005}
 --- !u!1 &6643789650000150189
 GameObject:
   m_ObjectHideFlags: 0
@@ -1451,7 +1467,7 @@ TilemapRenderer:
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 6643789650000150189}
-  m_Enabled: 1
+  m_Enabled: 0
   m_CastShadows: 0
   m_ReceiveShadows: 0
   m_DynamicOccludee: 1
@@ -2144,7 +2160,7 @@ TilemapRenderer:
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 8574575733328921395}
-  m_Enabled: 1
+  m_Enabled: 0
   m_CastShadows: 0
   m_ReceiveShadows: 0
   m_DynamicOccludee: 1
