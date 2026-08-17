@@ -41,6 +41,8 @@ namespace Game.Player
         public LayerMask groundLayer;
         [Tooltip("Solo cuenta como suelo si la normal apunta hacia arriba (evita que pared lateral te ponga grounded).")]
         [SerializeField, Range(0f, 1f)] private float groundNormalMinY = 0.55f;
+        [SerializeField, Min(0f)] private float slopeStickSpeed = 2f;
+        private const float SlopeNormalMaxY = 0.999f;
 
         [Header("Wall Check")]
         public Transform wallCheck;
@@ -246,6 +248,10 @@ namespace Game.Player
         [SerializeField, Range(0f, 1f)] private float jumpAnticipationMoveSpeedMultiplier = 0.2f;
 
         private bool isGrounded;
+        private Vector2 groundNormal = Vector2.up;
+        private bool slopeMovementSuppressedUntilAirborne;
+        private bool wasUsingSlopeMovementLastMove;
+        private float slopeHorizontalSpeed;
         private bool isTouchingWall;
         private bool isWallSliding;
         private bool isWallLosingContact;
@@ -267,6 +273,9 @@ namespace Game.Player
         private float dashTimer;
         private float dashCooldownTimer;
         private int airDashesRemaining;
+        private bool dashStartedGrounded;
+        private int dashHorizontalSign;
+        private bool dashFollowingSlope;
 
         private float wallJumpLockTimer;
         private float defaultGravityScale;
@@ -400,6 +409,10 @@ namespace Game.Player
             isAttacking = false;
             canCancelAttack = false;
             suppressWallWhileDownHeld = false;
+            slopeMovementSuppressedUntilAirborne = false;
+            groundNormal = Vector2.up;
+            wasUsingSlopeMovementLastMove = false;
+            slopeHorizontalSpeed = 0f;
 
             if (carriedObject != null)
                 carriedObject.Drop();
@@ -1174,6 +1187,61 @@ namespace Game.Player
 
             float rate = Mathf.Abs(inputX) > 0.01f ? accel : decel;
 
+            bool useSlopeMovement = ShouldUseSlopeMovement();
+
+            if (useSlopeMovement)
+            {
+                Vector2 tangent = new Vector2(groundNormal.y, -groundNormal.x).normalized;
+                bool enteringSlope = !wasUsingSlopeMovementLastMove;
+                if (enteringSlope)
+                    slopeHorizontalSpeed = rb.velocity.x;
+
+                float targetHorizontalSpeed = targetSpeed;
+
+                float horizontalRate = rate;
+
+                bool changingSlopeDirection =
+                    Mathf.Abs(targetHorizontalSpeed) > 0.01f &&
+                    Mathf.Sign(targetHorizontalSpeed) != Mathf.Sign(slopeHorizontalSpeed) &&
+                    Mathf.Abs(slopeHorizontalSpeed) > 0.1f;
+
+                if (changingSlopeDirection)
+                    horizontalRate *= stats.turnAccelerationMultiplier;
+
+                slopeHorizontalSpeed = Mathf.MoveTowards(
+                    slopeHorizontalSpeed,
+                    targetHorizontalSpeed,
+                    horizontalRate * Time.fixedDeltaTime
+                );
+
+                if (Mathf.Abs(inputX) < 0.01f && Mathf.Abs(slopeHorizontalSpeed) < 0.02f)
+                    slopeHorizontalSpeed = 0f;
+
+                float newHorizontalSpeed = slopeHorizontalSpeed;
+                float newSurfaceSpeed = newHorizontalSpeed / tangent.x;
+
+                Vector2 baseGravity = Physics2D.gravity * stats.gravityScale;
+                float gravityAlongSlope = Vector2.Dot(baseGravity, tangent);
+                newSurfaceSpeed -= gravityAlongSlope * Time.fixedDeltaTime;
+
+                rb.velocity =
+                    tangent * newSurfaceSpeed -
+                    groundNormal * slopeStickSpeed;
+                wasUsingSlopeMovementLastMove = true;
+                return;
+            }
+
+            if (wasUsingSlopeMovementLastMove)
+            {
+                rb.velocity = new Vector2(
+                    slopeHorizontalSpeed,
+                    rb.velocity.y
+                );
+            }
+
+            wasUsingSlopeMovementLastMove = false;
+            slopeHorizontalSpeed = 0f;
+
             bool changingDirection =
                 Mathf.Abs(targetSpeed) > 0.01f &&
                 Mathf.Sign(targetSpeed) != Mathf.Sign(rb.velocity.x) &&
@@ -1218,6 +1286,7 @@ namespace Game.Player
         private void Jump()
         {
             float jumpForce = stats.jumpForce * (IsCarrying ? carryingJumpForceMultiplier : 1f);
+            slopeMovementSuppressedUntilAirborne = true;
             rb.velocity = new Vector2(rb.velocity.x, jumpForce);
         }
 
@@ -1276,6 +1345,12 @@ namespace Game.Player
 
         private void ApplyBetterJumpGravity()
         {
+            if (ShouldUseSlopeMovement())
+            {
+                rb.gravityScale = stats.gravityScale;
+                return;
+            }
+
             float vy = rb.velocity.y;
 
             if (vy < stats.maxFallSpeed)
@@ -1329,25 +1404,139 @@ namespace Game.Player
 
         private void StartDash()
         {
+            dashStartedGrounded =
+                isGrounded &&
+                !slopeMovementSuppressedUntilAirborne;
+            dashHorizontalSign = facingDir < 0 ? -1 : 1;
+            dashFollowingSlope = false;
+            ResetSlopeMovementCarry();
+
             isDashing = true;
             dashTimer = stats.dashDuration;
             dashCooldownTimer = stats.dashCooldown;
 
             rb.gravityScale = 0f;
-            rb.velocity = new Vector2(facingDir * stats.dashSpeed, 0f);
+            rb.velocity =
+                Vector2.right *
+                dashHorizontalSign *
+                stats.dashSpeed;
         }
 
         private void UpdateDash()
         {
             dashTimer -= Time.fixedDeltaTime;
             if (dashTimer <= 0f)
+            {
                 EndDash();
+                return;
+            }
+
+            if (!dashStartedGrounded || slopeMovementSuppressedUntilAirborne)
+                return;
+
+            CheckGround();
+
+            Vector2 slopeNormal;
+            bool hasValidSlope = TryGetCurrentDashSlope(out slopeNormal);
+            if (!hasValidSlope)
+                hasValidSlope = TryProbeDashSlope(out slopeNormal);
+
+            if (hasValidSlope)
+            {
+                Vector2 tangent = new Vector2(slopeNormal.y, -slopeNormal.x).normalized;
+                Vector2 signedTangent = tangent * dashHorizontalSign;
+
+                rb.velocity =
+                    signedTangent * stats.dashSpeed -
+                    slopeNormal * slopeStickSpeed;
+                dashFollowingSlope = true;
+                return;
+            }
+
+            if (!dashFollowingSlope)
+                return;
+
+            rb.velocity =
+                Vector2.right *
+                dashHorizontalSign *
+                stats.dashSpeed;
+            dashFollowingSlope = false;
         }
 
         private void EndDash()
         {
             isDashing = false;
             rb.gravityScale = defaultGravityScale;
+            dashStartedGrounded = false;
+            dashFollowingSlope = false;
+            ResetSlopeMovementCarry();
+        }
+
+        private void ResetSlopeMovementCarry()
+        {
+            wasUsingSlopeMovementLastMove = false;
+            slopeHorizontalSpeed = 0f;
+        }
+
+        private bool IsValidDashSlopeNormal(Vector2 normal)
+        {
+            return
+                normal.y >= groundNormalMinY &&
+                normal.y < SlopeNormalMaxY;
+        }
+
+        private bool TryGetCurrentDashSlope(out Vector2 normal)
+        {
+            normal = groundNormal;
+            return
+                isGrounded &&
+                currentGroundPlatform == null &&
+                IsValidDashSlopeNormal(normal);
+        }
+
+        private bool TryProbeDashSlope(out Vector2 normal)
+        {
+            normal = Vector2.up;
+            if (groundCheck == null) return false;
+
+            int mask = groundLayer.value != 0 ? groundLayer.value : SolidMask();
+            Vector2 size = new Vector2(
+                Mathf.Max(0.01f, groundCheckBoxSize.x),
+                Mathf.Max(0.01f, groundCheckBoxSize.y)
+            );
+            Vector2 origin = (Vector2)groundCheck.position + Vector2.up * (size.y * 0.5f);
+            Vector2 direction = Vector2.right * dashHorizontalSign;
+            float castDistance = stats.dashSpeed * Time.fixedDeltaTime + groundCheckDistance;
+
+            int hitCount = Physics2D.BoxCastNonAlloc(
+                origin,
+                size,
+                0f,
+                direction,
+                groundHits,
+                castDistance,
+                mask
+            );
+
+            RaycastHit2D closestHit = default;
+            float closestDistance = float.PositiveInfinity;
+            for (int i = 0; i < hitCount; i++)
+            {
+                RaycastHit2D candidate = groundHits[i];
+                if (candidate.collider == null) continue;
+                if (candidate.collider.isTrigger) continue;
+                if (candidate.collider.GetComponentInParent<HorizontalMovingPlatform>() != null) continue;
+                if (!IsValidDashSlopeNormal(candidate.normal)) continue;
+                if (candidate.distance >= closestDistance) continue;
+
+                closestDistance = candidate.distance;
+                closestHit = candidate;
+            }
+
+            if (closestHit.collider == null) return false;
+
+            normal = closestHit.normal.normalized;
+            return true;
         }
 
         // --------------------
@@ -1609,7 +1798,14 @@ namespace Game.Player
         // --------------------
         private void CheckGround()
         {
-            if (groundCheck == null) return;
+            if (groundCheck == null)
+            {
+                isGrounded = false;
+                groundNormal = Vector2.up;
+                currentGroundPlatform = null;
+                slopeMovementSuppressedUntilAirborne = false;
+                return;
+            }
 
             int mask = groundLayer.value != 0 ? groundLayer.value : SolidMask();
             Vector2 size = new Vector2(
@@ -1644,6 +1840,10 @@ namespace Game.Player
             }
 
             isGrounded = bestHit.collider != null;
+            groundNormal = isGrounded ? bestHit.normal.normalized : Vector2.up;
+            if (!isGrounded)
+                slopeMovementSuppressedUntilAirborne = false;
+
             currentGroundPlatform = isGrounded
                 ? bestHit.collider.GetComponentInParent<HorizontalMovingPlatform>()
                 : null;
@@ -1653,6 +1853,16 @@ namespace Game.Player
                 lastGroundDebugCollider = bestHit.collider;
                 Debug.Log($"[GROUND DEBUG] grounded={isGrounded} hit={DescribeCollider2D(bestHit.collider)} point={bestHit.point} normal={bestHit.normal}");
             }
+        }
+
+        private bool ShouldUseSlopeMovement()
+        {
+            return
+                isGrounded &&
+                groundNormal.y >= groundNormalMinY &&
+                groundNormal.y < SlopeNormalMaxY &&
+                !slopeMovementSuppressedUntilAirborne &&
+                currentGroundPlatform == null;
         }
 
         private void ApplyMovingPlatformDelta()
@@ -2570,6 +2780,10 @@ namespace Game.Player
         {
             if (dir.sqrMagnitude < 0.0001f) dir = Vector2.right * facingDir;
             dir = dir.normalized;
+
+            dashStartedGrounded = false;
+            dashFollowingSlope = false;
+            ResetSlopeMovementCarry();
 
             isDashing = true;
             dashTimer = stats.dashDuration;
