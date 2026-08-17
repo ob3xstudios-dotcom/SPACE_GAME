@@ -44,6 +44,9 @@ TagManager:
   - name: Background
     uniqueID: 1103849923
     locked: 0
+  - name: Far Environment
+    uniqueID: 3384274279
+    locked: 0
   - name: Environment Art
     uniqueID: 1222496417
     locked: 0

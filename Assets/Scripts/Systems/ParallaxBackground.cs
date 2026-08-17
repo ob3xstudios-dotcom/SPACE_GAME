@@ -1,5 +1,6 @@
 using System;
 using UnityEngine;
+using UnityEngine.Serialization;
 
 namespace Game.Systems
 {
@@ -9,7 +10,10 @@ namespace Game.Systems
         public class ParallaxLayer
         {
             public Transform layer;
-            [Range(0f, 1f)] public float parallaxFactor;
+            [FormerlySerializedAs("parallaxFactor")]
+            [Range(0f, 1f)] public float horizontalFactor;
+            public bool useSeparateVerticalFactor;
+            [Range(0f, 1f)] public float verticalFactor;
 
             [NonSerialized] public Vector3 startPosition;
         }
@@ -45,7 +49,13 @@ namespace Game.Systems
                 ParallaxLayer layer = layers[i];
                 if (layer == null || layer.layer == null) continue;
 
-                Vector3 offset = cameraDelta * layer.parallaxFactor;
+                float appliedVerticalFactor = layer.useSeparateVerticalFactor
+                    ? layer.verticalFactor
+                    : layer.horizontalFactor;
+                Vector3 offset = new Vector3(
+                    cameraDelta.x * layer.horizontalFactor,
+                    cameraDelta.y * appliedVerticalFactor,
+                    0f);
                 layer.layer.position = new Vector3(
                     layer.startPosition.x + offset.x,
                     layer.startPosition.y + offset.y,
@@ -98,7 +108,7 @@ namespace Game.Systems
                 layers[i] = new ParallaxLayer
                 {
                     layer = layerTransforms[i],
-                    parallaxFactor = parallaxFactors != null && i < parallaxFactors.Length ? parallaxFactors[i] : 0f
+                    horizontalFactor = parallaxFactors != null && i < parallaxFactors.Length ? parallaxFactors[i] : 0f
                 };
             }
 
