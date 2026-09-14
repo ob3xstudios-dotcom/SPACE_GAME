@@ -67,42 +67,6 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   holdSecondsForLayDown: 2
   debugInput: 0
---- !u!114 &6723490123456789012
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 933070315492324510}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 7a1d4b2e8c7f4e35a6b9c0d1e2f34567, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: 
-  controller: {fileID: 2901667793802344536}
-  rb: {fileID: 3521601697932617640}
-  capsule: {fileID: 6266200590295163230}
-  visualRoot: {fileID: 0}
-  visualRenderers: []
-  audioSource: {fileID: 0}
-  wallSlideDust: {fileID: 0}
-  wallJumpBurst: {fileID: 0}
-  landBurst: {fileID: 0}
-  createDefaultParticles: 1
-  wallSlideStartClip: {fileID: 0}
-  wallJumpClip: {fileID: 0}
-  landClip: {fileID: 0}
-  wallSlideStartVolume: 0.35
-  wallJumpVolume: 0.75
-  landVolume: 0.55
-  minLandingSpeed: 6
-  hardLandingSpeed: 14
-  enableWallSlideLean: 1
-  wallSlideLeanDegrees: 5
-  wallSlideLeanLerp: 14
-  enableWallSlideTint: 1
-  wallSlideTint: {r: 0.78, g: 0.92, b: 1, a: 1}
-  wallSlideTintLerp: 18
 --- !u!114 &2901667793802344536
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -137,21 +101,40 @@ MonoBehaviour:
   wallNormalMinX: 0.55
   wallSlideSpeedMultiplier: 0.35
   wallSlideTargetFallSpeed: 1.2
+  wallSlideExitFastFallTime: 0.1
+  wallSlideExitFastFallSpeed: 7
   wallStickTime: 0.08
   wallCoyoteTime: 0.14
   wallJumpLockTime: 0.1
+  wallJumpRegrabDelay: 0.12
+  narrowWallProbeDistance: 1.2
+  narrowWallJumpForceXMultiplier: 0.65
+  wallSlideEdgeVisibleFractionThreshold: 0.5
   wallInputDeadzone: 0.251
+  facingInputDeadzone: 0.15
+  airborneFacingInputThreshold: 0.55
   requirePushIntoWallForSlide: 1
   logWallDebug: 0
   wallDebugLogInterval: 0.25
   enableCornerAntiStuck: 1
   cornerStuckVerticalSpeedThreshold: 0.08
   cornerStuckTime: 0.12
-  cornerPushOutSpeed: 0.8
+  cornerPushOutSpeed: 0.5
   cornerForceFallSpeed: -1.2
   cornerStuckProbeDistance: 0.12
   cornerStuckHorizontalSpeedThreshold: 0.15
+  recentlyGroundedAntiStuckGraceTime: 0.08
   logCornerStuckDebug: 0
+  cornerCorrectionOffsets:
+  - {x: 0, y: 0.05, z: 0}
+  - {x: 0, y: 0.1, z: 0}
+  - {x: 0, y: 0.15, z: 0}
+  - {x: -0.05, y: 0.05, z: 0}
+  - {x: -0.1, y: 0.05, z: 0}
+  - {x: -0.05, y: 0.1, z: 0}
+  - {x: -0.1, y: 0.1, z: 0}
+  - {x: -0.05, y: 0.15, z: 0}
+  - {x: -0.1, y: 0.15, z: 0}
   enableLedgeGrab: 1
   ledgeGrabCooldown: 0.1
   ledgeGrabMaxVerticalSpeedToAllow: 10
@@ -171,6 +154,8 @@ MonoBehaviour:
   ledgeHangOffset: {x: 0.06, y: 0.1}
   ledgeClimbJumpY: 10
   ledgeClimbJumpX: 1.5
+  ledgeClimbDuration: 0.18
+  ledgeClimbColliderDisableTime: 0.1
   requirePushIntoWallToGrab: 0
   hangDownThreshold: 0.5
   disableWallWhileDownHeldAfterDrop: 1
@@ -200,7 +185,18 @@ MonoBehaviour:
   carryingJumpForceMultiplier: 0.5
   interactLockSecondsAfterPickup: 0.15
   interactLockSecondsAfterDrop: 0.25
+  swingMotorForce: 38
+  swingJumpForceX: 8
+  swingJumpForceY: 12
+  swingExitCooldown: 0.12
+  swingDownThreshold: 0.5
+  swingVelocityKeepMultiplier: 0.85
+  swingMinAngle: -75
+  swingMaxAngle: 75
+  swingMinBelowAnchor: 0.05
   stealthKill: {fileID: 0}
+  jumpStartDelay: 0
+  jumpAnticipationMoveSpeedMultiplier: 0.2
 --- !u!50 &3521601697932617640
 Rigidbody2D:
   serializedVersion: 4
@@ -303,6 +299,7 @@ MonoBehaviour:
   blinkOnIFrames: 1
   blinkInterval: 0.08
   blinkRenderers: []
+  externalDeathHandling: 0
   respawnPoint: {fileID: 0}
   respawnDelay: 0
   restoreFullHealthOnRespawn: 1
@@ -346,7 +343,7 @@ SpriteRenderer:
   m_AutoUVMaxAngle: 89
   m_LightmapParameters: {fileID: 0}
   m_SortingLayerID: 1583063268
-  m_SortingLayer: 5
+  m_SortingLayer: 6
   m_SortingOrder: 10
   m_Sprite: {fileID: 21300000, guid: 71218a5ee15ded34aa81e95c2cd9f9b2, type: 3}
   m_Color: {r: 1, g: 1, b: 1, a: 1}
@@ -393,17 +390,34 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   speedParam: Speed
+  runAnimSpeedParam: RunAnimSpeed
   groundedParam: Grounded
   vyParam: Vy
   hangingParam: Hanging
   wallSlidingParam: WallSliding
+  wallSlideEdgeParam: WallSlideEdge
   wallSideParam: WallSide
+  jumpStartTrigger: JumpStart
+  jumpEndTrigger: JumpEnd
+  jumpStartStateName: Monkey_JumpStart
+  wallImpactTrigger: WallImpact
+  wallJumpStartTrigger: WallJumpStart
+  wallImpactStateName: Base Layer.Monkey_WallImpact
+  wallSlideStateName: Base Layer.Monkey_WallSlide
+  wallJumpStartStateName: Base Layer.Monkey_WallJumpStart
+  jumpEndStateName: Base Layer.Monkey_JumpEnd
+  idleStateName: Base Layer.Locomotion.Monkey_Idle
+  runStateName: Base Layer.Locomotion.Monkey_Run
+  fallingStateName: Base Layer.Locomotion.Monkey_Falling
   attackTrigger: Attack
   attackDirIntParam: AttackDir
   parryTrigger: Parry
   crouchBool: Crouch
   layDownBool: LayDown
   movingThreshold: 0.05
+  minRunAnimSpeed: 0.35
+  maxRunAnimSpeed: 1.25
+  jumpEndVisualLockTime: 0.25
 --- !u!114 &4854680618531105496
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -555,6 +569,42 @@ MonoBehaviour:
   emptySprite: {fileID: 21300000, guid: 3bee93af2da838547ad44d845fb2e92a, type: 3}
   maxFallback: 3
   logBindingOnce: 0
+--- !u!114 &6723490123456789012
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 933070315492324510}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 7a1d4b2e8c7f4e35a6b9c0d1e2f34567, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  controller: {fileID: 2901667793802344536}
+  rb: {fileID: 3521601697932617640}
+  capsule: {fileID: 6266200590295163230}
+  visualRoot: {fileID: 0}
+  visualRenderers: []
+  audioSource: {fileID: 0}
+  wallSlideDust: {fileID: 0}
+  wallJumpBurst: {fileID: 0}
+  landBurst: {fileID: 0}
+  createDefaultParticles: 1
+  wallSlideStartClip: {fileID: 0}
+  wallJumpClip: {fileID: 0}
+  landClip: {fileID: 0}
+  wallSlideStartVolume: 0.35
+  wallJumpVolume: 0.75
+  landVolume: 0.55
+  minLandingSpeed: 6
+  hardLandingSpeed: 14
+  enableWallSlideLean: 1
+  wallSlideLeanDegrees: 5
+  wallSlideLeanLerp: 14
+  enableWallSlideTint: 1
+  wallSlideTint: {r: 0.78, g: 0.92, b: 1, a: 1}
+  wallSlideTintLerp: 18
 --- !u!1 &1008033244344262969
 GameObject:
   m_ObjectHideFlags: 0
