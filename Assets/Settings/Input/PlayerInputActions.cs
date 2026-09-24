@@ -413,7 +413,7 @@ namespace Game.Input
                 {
                     ""name"": """",
                     ""id"": ""7f3f6106-3958-4f80-b184-1e8ecd9ee463"",
-                    ""path"": ""<Gamepad>/leftTrigger"",
+                    ""path"": ""<Gamepad>/leftShoulder"",
                     ""interactions"": """",
                     ""processors"": """",
                     ""groups"": """",

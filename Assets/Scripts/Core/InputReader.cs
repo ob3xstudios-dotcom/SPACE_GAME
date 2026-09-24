@@ -16,8 +16,9 @@ namespace Game.Input
         private bool dashPressed;
         private bool parryPressed;
         private bool interactPressed;
-        private bool swingGrabPressed;
         private bool crouchPressed;
+        private int swingGrabPressedFrame = -1;
+        private int swingGrabConsumedFrame = -1;
 
         [Header("Crouch / LayDown")]
         [SerializeField, Range(0.2f, 5f)] private float holdSecondsForLayDown = 2f;
@@ -102,6 +103,9 @@ namespace Game.Input
 
         private void Update()
         {
+            if (swingGrabPressedFrame >= 0 && swingGrabPressedFrame != Time.frameCount)
+                swingGrabPressedFrame = -1;
+
             // FALLBACK DIRECTO: si los callbacks no llegan, esto debería detectarlo.
             if (actions != null && actions.Gameplay.Parry.WasPressedThisFrame())
             {
@@ -117,7 +121,7 @@ namespace Game.Input
 
             if (actions != null && actions.Gameplay.SwingGrab.WasPressedThisFrame())
             {
-                swingGrabPressed = true;
+                RegisterSwingGrabPressed();
                 if (debugInput) Debug.Log("[INPUT] SWING GRAB WasPressedThisFrame");
             }
 
@@ -184,9 +188,24 @@ namespace Game.Input
 
         public bool ConsumeSwingGrabPressed()
         {
-            if (!swingGrabPressed) return false;
-            swingGrabPressed = false;
+            int currentFrame = Time.frameCount;
+            if (swingGrabPressedFrame != currentFrame || swingGrabConsumedFrame == currentFrame)
+            {
+                swingGrabPressedFrame = -1;
+                return false;
+            }
+
+            swingGrabPressedFrame = -1;
+            swingGrabConsumedFrame = currentFrame;
             return true;
+        }
+
+        private void RegisterSwingGrabPressed()
+        {
+            int currentFrame = Time.frameCount;
+            if (swingGrabConsumedFrame == currentFrame) return;
+
+            swingGrabPressedFrame = currentFrame;
         }
 
         public bool ConsumeCrouchPressed()
@@ -220,6 +239,7 @@ namespace Game.Input
         {
             IsCrouching = false;
             IsLayDown = false;
+            crouchPressed = false;
             crouchHeld = false;
             crouchHoldTimer = 0f;
             layDownTriggeredThisHold = false;
@@ -285,7 +305,7 @@ namespace Game.Input
 
         private void OnSwingGrabStarted(InputAction.CallbackContext ctx)
         {
-            swingGrabPressed = true;
+            RegisterSwingGrabPressed();
             if (debugInput) Debug.Log("[INPUT] SWING GRAB started");
         }
 

@@ -219,6 +219,14 @@ namespace Game.Player
 
         [Header("Swing")]
         [SerializeField, Min(0f)] private float swingMotorForce = 38f;
+        [SerializeField, Range(0f, 1f)] private float swingTangentialAssistMultiplier = 0.2f;
+        [SerializeField, Range(1f, 2f)] private float swingCounterInputMultiplier = 1.15f;
+        [SerializeField, Min(0f)] private float swingRestSpeedThreshold = 0.35f;
+        [SerializeField, Range(0f, 0.95f)] private float swingAssistFadeStartRatio = 0.35f;
+        [SerializeField, Range(0.05f, 1f)] private float swingAssistStopRatio = 0.75f;
+        [SerializeField, Min(0f)] private float swingIdleTangentialDamping = 1.25f;
+        [SerializeField, Range(0f, 10f)] private float swingIdleSettleAngle = 1.5f;
+        [SerializeField, Min(0f)] private float swingIdleSettleSpeed = 0.15f;
         [SerializeField, Min(0f)] private float swingJumpForceX = 8f;
         [SerializeField, Min(0f)] private float swingJumpForceY = 12f;
         [SerializeField, Range(0f, 0.5f)] private float swingExitCooldown = 0.12f;
@@ -959,6 +967,8 @@ namespace Game.Player
 
         private void EnterSwing(SwingPole pole)
         {
+            Vector2 entryVelocity = rb.velocity;
+
             currentSwingPole = pole;
             isSwinging = true;
             isDashing = false;
@@ -981,10 +991,18 @@ namespace Game.Player
 
             Vector2 anchor = pole.AnchorPosition;
             if (pole.SnapOnEnter)
-            {
                 rb.position = pole.GetInitialPlayerPosition();
-                rb.velocity = Vector2.zero;
+
+            Vector2 radial = rb.position - anchor;
+            float radialSqrMagnitude = radial.sqrMagnitude;
+            if (radialSqrMagnitude > 0.000001f)
+            {
+                Vector2 radialDirection = radial / Mathf.Sqrt(radialSqrMagnitude);
+                Vector2 tangent = new Vector2(-radialDirection.y, radialDirection.x);
+                rb.velocity = tangent * Vector2.Dot(entryVelocity, tangent);
             }
+            else
+                rb.velocity = Vector2.zero;
 
             swingJoint.connectedBody = pole.ConnectedBody;
             swingJoint.connectedAnchor = pole.GetConnectedAnchor();
@@ -1009,8 +1027,7 @@ namespace Game.Player
                 return;
             }
 
-            bool downHeld = inputYClean <= -swingDownThreshold;
-            if (downHeld || input.ConsumeInteractPressed())
+            if (input.ConsumeInteractPressed())
                 ExitSwing(false, inputXClean);
         }
 
@@ -1030,10 +1047,70 @@ namespace Game.Player
             if (inputX != 0f)
             {
                 ApplyFacing((int)Mathf.Sign(inputX));
-                rb.AddForce(Vector2.right * inputX * swingMotorForce, ForceMode2D.Force);
+                ApplySwingTangentialAssist(inputX);
             }
+            else
+                ApplySwingIdleDamping();
 
             ClampSwingArc();
+        }
+
+        private void ApplySwingTangentialAssist(float inputX)
+        {
+            Vector2 radial = rb.position - currentSwingPole.AnchorPosition;
+            float radialSqrMagnitude = radial.sqrMagnitude;
+            if (radialSqrMagnitude <= 0.000001f) return;
+
+            Vector2 radialDirection = radial / Mathf.Sqrt(radialSqrMagnitude);
+            Vector2 tangent = new Vector2(-radialDirection.y, radialDirection.x);
+            float tangentialInput = Vector2.Dot(Vector2.right * inputX, tangent);
+            if (Mathf.Abs(tangentialInput) <= 0.0001f) return;
+
+            float angle = Vector2.SignedAngle(Vector2.down, radialDirection);
+            float angleLimit = angle >= 0f ? swingMaxAngle : Mathf.Abs(swingMinAngle);
+            float angleRatio = Mathf.Abs(angle) / Mathf.Max(1f, angleLimit);
+            float fadeStartRatio = Mathf.Clamp(swingAssistFadeStartRatio, 0f, 0.95f);
+            float stopRatio = Mathf.Clamp(swingAssistStopRatio, fadeStartRatio + 0.01f, 1f);
+            float fadeProgress = Mathf.InverseLerp(fadeStartRatio, stopRatio, angleRatio);
+            float angleMultiplier = 1f - Mathf.SmoothStep(0f, 1f, fadeProgress);
+            if (angleMultiplier <= 0f) return;
+
+            float tangentialSpeed = Vector2.Dot(rb.velocity, tangent);
+            bool moving = Mathf.Abs(tangentialSpeed) > Mathf.Max(0f, swingRestSpeedThreshold);
+            bool accompanyingMotion = !moving || tangentialSpeed * tangentialInput > 0f;
+            float directionMultiplier = accompanyingMotion
+                ? 1f
+                : Mathf.Max(1f, swingCounterInputMultiplier);
+            float forceMagnitude = tangentialInput * swingMotorForce *
+                Mathf.Clamp01(swingTangentialAssistMultiplier) * directionMultiplier * angleMultiplier;
+
+            rb.AddForce(tangent * forceMagnitude, ForceMode2D.Force);
+        }
+
+        private void ApplySwingIdleDamping()
+        {
+            Vector2 anchor = currentSwingPole.AnchorPosition;
+            Vector2 radial = rb.position - anchor;
+            float radialSqrMagnitude = radial.sqrMagnitude;
+            if (radialSqrMagnitude <= 0.000001f) return;
+
+            float radius = Mathf.Sqrt(radialSqrMagnitude);
+            Vector2 radialDirection = radial / radius;
+            Vector2 tangent = new Vector2(-radialDirection.y, radialDirection.x);
+            float tangentialSpeed = Vector2.Dot(rb.velocity, tangent);
+            float angle = Vector2.SignedAngle(Vector2.down, radialDirection);
+
+            bool nearCenter = Mathf.Abs(angle) <= Mathf.Max(0f, swingIdleSettleAngle);
+            bool nearlyStopped = Mathf.Abs(tangentialSpeed) <= Mathf.Max(0f, swingIdleSettleSpeed);
+            if (nearCenter && nearlyStopped)
+            {
+                rb.position = anchor + Vector2.down * radius;
+                rb.velocity = Vector2.zero;
+                return;
+            }
+
+            float damping = Mathf.Max(0f, swingIdleTangentialDamping);
+            rb.AddForce(-tangent * tangentialSpeed * damping * rb.mass, ForceMode2D.Force);
         }
 
         private void ClampSwingArc()
