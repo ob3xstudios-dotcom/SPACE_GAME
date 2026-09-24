@@ -85,6 +85,19 @@ MonoBehaviour:
   stamina: {fileID: 0}
   dashStaminaCost: 1
   visualRoot: {fileID: 0}
+  standingColliderProfile:
+    size: {x: 1.019415, y: 1.820116}
+    offset: {x: -0.009708, y: -0.0023412}
+    direction: 0
+  crouchingColliderProfile:
+    size: {x: 1.019415, y: 1.42}
+    offset: {x: -0.009708, y: -0.2023992}
+    direction: 0
+  layDownColliderProfile:
+    size: {x: 1.6, y: 0.76}
+    offset: {x: -0.009708, y: -0.5323992}
+    direction: 1
+  postureClearanceSkin: 0.02
   groundCheck: {fileID: 4648022678629483259}
   groundCheckRadius: 0.2
   groundCheckBoxSize: {x: 0.7, y: 0.08}
@@ -256,8 +269,8 @@ CapsuleCollider2D:
   m_IsTrigger: 0
   m_UsedByEffector: 0
   m_UsedByComposite: 0
-  m_Offset: {x: -0.0097075105, y: -0.0023412108}
-  m_Size: {x: 1.019415, y: 1.8201159}
+  m_Offset: {x: -0.009708, y: -0.0023412}
+  m_Size: {x: 1.019415, y: 1.820116}
   m_Direction: 0
 --- !u!114 &4778701762984339011
 MonoBehaviour:

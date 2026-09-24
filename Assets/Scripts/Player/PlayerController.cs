@@ -16,6 +16,24 @@ namespace Game.Player
     [RequireComponent(typeof(CapsuleCollider2D))]
     public class PlayerController : MonoBehaviour
     {
+        [Serializable]
+        private struct PostureColliderProfile
+        {
+            public Vector2 size;
+            public Vector2 offset;
+            public CapsuleDirection2D direction;
+
+            public PostureColliderProfile(
+                Vector2 size,
+                Vector2 offset,
+                CapsuleDirection2D direction)
+            {
+                this.size = size;
+                this.offset = offset;
+                this.direction = direction;
+            }
+        }
+
         [Header("Referencias")]
         public InputReader input;
         public CharacterStats stats;
@@ -29,6 +47,24 @@ namespace Game.Player
 
         [Header("Facing / Visual")]
         [SerializeField] private Transform visualRoot;
+
+        [Header("Posture Colliders")]
+        [SerializeField] private PostureColliderProfile standingColliderProfile =
+            new PostureColliderProfile(
+                new Vector2(1.019415f, 1.820116f),
+                new Vector2(-0.009708f, -0.0023412f),
+                CapsuleDirection2D.Vertical);
+        [SerializeField] private PostureColliderProfile crouchingColliderProfile =
+            new PostureColliderProfile(
+                new Vector2(1.019415f, 1.42f),
+                new Vector2(-0.009708f, -0.2023992f),
+                CapsuleDirection2D.Vertical);
+        [SerializeField] private PostureColliderProfile layDownColliderProfile =
+            new PostureColliderProfile(
+                new Vector2(1.60f, 0.76f),
+                new Vector2(-0.009708f, -0.5323992f),
+                CapsuleDirection2D.Horizontal);
+        [SerializeField, Min(0f)] private float postureClearanceSkin = 0.02f;
 
         // --------------------
         // GROUND / WALL
@@ -293,6 +329,7 @@ namespace Game.Player
         private readonly RaycastHit2D[] wallHits = new RaycastHit2D[8];
         private readonly RaycastHit2D[] wallEdgeHits = new RaycastHit2D[8];
         private readonly Collider2D[] cornerCorrectionHits = new Collider2D[8];
+        private readonly Collider2D[] postureClearanceHits = new Collider2D[16];
         private readonly HashSet<UnityEngine.Object> attackDamageTargets = new HashSet<UnityEngine.Object>();
         private readonly List<IInteractable> interactablesInRange = new List<IInteractable>();
         private bool lastAttackHitEnemy;
@@ -450,8 +487,7 @@ namespace Game.Player
             rb.velocity = Vector2.zero;
             rb.angularVelocity = 0f;
 
-            if (input != null)
-                input.ForceStandUp("PlayerController.ResetTransientState");
+            ForceStandingPosture("PlayerController.ResetTransientState");
         }
 
         private void Awake()
@@ -495,6 +531,182 @@ namespace Game.Player
 
             if (stealthKill == null)
                 stealthKill = GetComponent<PlayerStealthKill>();
+        }
+
+        private bool TryApplyPostureCommand(
+            InputReader.CrouchCommand command,
+            string source)
+        {
+            if (!command.IsValid || input == null || capsule == null) return false;
+            if (!CanAdoptPosture(command.TargetPosture, source)) return false;
+
+            // Physical shape first; the logical/animated posture is committed only after it fits.
+            ApplyPostureColliderProfile(command.TargetPosture);
+            input.CommitPostureTransition(command, source);
+            return true;
+        }
+
+        private bool TryApplyPosture(InputReader.PlayerPosture targetPosture, string source)
+        {
+            if (input == null || capsule == null) return false;
+            if (!CanAdoptPosture(targetPosture, source)) return false;
+
+            ApplyPostureColliderProfile(targetPosture);
+            input.CommitPosture(targetPosture, source);
+            return true;
+        }
+
+        private bool TryStandingPostureAndCancelGesture(string source)
+        {
+            if (input == null) return false;
+
+            input.CancelCrouchGesture(source);
+            return TryApplyPosture(InputReader.PlayerPosture.Standing, source);
+        }
+
+        private void ForceStandingPosture(string source)
+        {
+            if (capsule == null || input == null) return;
+
+            input.CancelCrouchGesture(source);
+            ApplyPostureColliderProfile(InputReader.PlayerPosture.Standing);
+            input.CommitPosture(InputReader.PlayerPosture.Standing, source);
+        }
+
+        private bool CanAdoptPosture(
+            InputReader.PlayerPosture targetPosture,
+            string source)
+        {
+            PostureColliderProfile targetProfile = GetPostureColliderProfile(targetPosture);
+            if (!IsPostureColliderProfileValid(targetProfile))
+            {
+                if (debugLogs)
+                    Debug.LogWarning($"[POSTURE] BLOCKED source={source} target={targetPosture} reason=invalid-profile");
+                return false;
+            }
+
+            InputReader.PlayerPosture currentPosture = input.CurrentPosture;
+            if (currentPosture == targetPosture) return true;
+
+            PostureColliderProfile currentProfile = GetPostureColliderProfile(currentPosture);
+            if (!RequiresPostureClearance(currentProfile, targetProfile)) return true;
+
+            return HasPostureClearance(targetPosture, targetProfile, source);
+        }
+
+        private bool HasPostureClearance(
+            InputReader.PlayerPosture targetPosture,
+            PostureColliderProfile targetProfile,
+            string source)
+        {
+            Vector3 lossyScale = transform.lossyScale;
+            Vector2 querySize = new Vector2(
+                targetProfile.size.x * Mathf.Abs(lossyScale.x),
+                targetProfile.size.y * Mathf.Abs(lossyScale.y)
+            );
+
+            float clearance = Mathf.Max(0f, postureClearanceSkin);
+            float floorContactTolerance = Mathf.Max(0.001f, clearance);
+            // Exclude only the supporting floor band, while requiring the same margin above
+            // and on both sides. This query never moves the Player or its Rigidbody2D.
+            querySize.x += clearance * 2f;
+            querySize.y = Mathf.Max(
+                0.01f,
+                querySize.y - floorContactTolerance + clearance
+            );
+
+            Vector2 queryCenter = transform.TransformPoint(targetProfile.offset);
+            queryCenter += Vector2.up * ((floorContactTolerance + clearance) * 0.5f);
+
+            ContactFilter2D filter = new ContactFilter2D();
+            filter.SetLayerMask(SolidMask());
+            filter.useLayerMask = true;
+            filter.useTriggers = false;
+
+            int hitCount = Physics2D.OverlapCapsule(
+                queryCenter,
+                querySize,
+                targetProfile.direction,
+                transform.eulerAngles.z,
+                filter,
+                postureClearanceHits
+            );
+
+            if (hitCount >= postureClearanceHits.Length)
+            {
+                if (debugLogs)
+                    Debug.LogWarning(
+                        $"[POSTURE] BLOCKED source={source} target={targetPosture} " +
+                        $"reason=clearance-buffer-full count={hitCount}");
+                return false;
+            }
+
+            for (int i = 0; i < hitCount; i++)
+            {
+                Collider2D hit = postureClearanceHits[i];
+                if (hit == null || hit == capsule || hit.isTrigger) continue;
+                if (hit.attachedRigidbody == rb) continue;
+                if (hit.transform == transform || hit.transform.IsChildOf(transform)) continue;
+
+                if (debugLogs)
+                    Debug.LogWarning(
+                        $"[POSTURE] BLOCKED source={source} target={targetPosture} " +
+                        $"reason=solid-overlap collider={DescribeCollider2D(hit)}");
+                return false;
+            }
+
+            return true;
+        }
+
+        private void ApplyPostureColliderProfile(InputReader.PlayerPosture posture)
+        {
+            PostureColliderProfile profile = GetPostureColliderProfile(posture);
+            capsule.direction = profile.direction;
+            capsule.size = profile.size;
+            capsule.offset = profile.offset;
+        }
+
+        private PostureColliderProfile GetPostureColliderProfile(
+            InputReader.PlayerPosture posture)
+        {
+            switch (posture)
+            {
+                case InputReader.PlayerPosture.Crouching:
+                    return crouchingColliderProfile;
+                case InputReader.PlayerPosture.LayDown:
+                    return layDownColliderProfile;
+                default:
+                    return standingColliderProfile;
+            }
+        }
+
+        private static bool RequiresPostureClearance(
+            PostureColliderProfile currentProfile,
+            PostureColliderProfile targetProfile)
+        {
+            if (currentProfile.direction != targetProfile.direction) return true;
+
+            const float epsilon = 0.0001f;
+            Vector2 currentMin = currentProfile.offset - currentProfile.size * 0.5f;
+            Vector2 currentMax = currentProfile.offset + currentProfile.size * 0.5f;
+            Vector2 targetMin = targetProfile.offset - targetProfile.size * 0.5f;
+            Vector2 targetMax = targetProfile.offset + targetProfile.size * 0.5f;
+
+            return
+                targetMin.x < currentMin.x - epsilon ||
+                targetMin.y < currentMin.y - epsilon ||
+                targetMax.x > currentMax.x + epsilon ||
+                targetMax.y > currentMax.y + epsilon;
+        }
+
+        private static bool IsPostureColliderProfileValid(PostureColliderProfile profile)
+        {
+            if (profile.size.x <= 0f || profile.size.y <= 0f) return false;
+
+            const float epsilon = 0.0001f;
+            return profile.direction == CapsuleDirection2D.Vertical
+                ? profile.size.y + epsilon >= profile.size.x
+                : profile.size.x + epsilon >= profile.size.y;
         }
 
         private void Update()
@@ -582,9 +794,10 @@ namespace Game.Player
             if (crouchCommand.IsValid)
             {
                 if (isGrounded)
-                    input.ApplyPostureTransition(crouchCommand);
+                    TryApplyPostureCommand(crouchCommand, "PlayerController.Update:CrouchCommand");
                 else
-                    input.ForceStandUp("PlayerController.Update:CrouchPressWhileAirborne");
+                    TryStandingPostureAndCancelGesture(
+                        "PlayerController.Update:CrouchPressWhileAirborne");
             }
 
             // Timers base
@@ -604,7 +817,8 @@ namespace Game.Player
             // ✅ Jump desde Crouch/LayDown: NO salta; intenta levantarse
             if (jumpPressed && (IsCrouching || IsLayDown))
             {
-                input.ForceStandUp("PlayerController.Update:JumpWhileLowered");
+                TryStandingPostureAndCancelGesture(
+                    "PlayerController.Update:JumpWhileLowered");
                 jumpPressed = false;
                 jumpBufferTimer = 0f;
             }
@@ -921,6 +1135,9 @@ namespace Game.Player
         public bool TryEnterSwing(SwingPole pole)
         {
             if (!CanEnterSwing(pole)) return false;
+            if (input != null &&
+                !TryStandingPostureAndCancelGesture("PlayerController.TryEnterSwing"))
+                return false;
 
             DropCarriedObject();
             EnterSwing(pole);
@@ -982,8 +1199,6 @@ namespace Game.Player
             if (isAttacking)
                 CancelAttack("swing");
 
-            input?.ForceStandUp("PlayerController.EnterSwing");
-
             rb.bodyType = RigidbodyType2D.Dynamic;
             rb.constraints = RigidbodyConstraints2D.FreezeRotation;
             rb.gravityScale = defaultGravityScale;
@@ -1015,7 +1230,7 @@ namespace Game.Player
 
         private void UpdateSwinging(float inputXClean, float inputYClean)
         {
-            input?.ForceStandUp("PlayerController.UpdateSwinging");
+            input?.CancelCrouchGesture("PlayerController.UpdateSwinging");
 
             input.ConsumeAttackPressed();
             input.ConsumeDashPressed();

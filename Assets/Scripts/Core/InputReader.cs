@@ -8,6 +8,7 @@ namespace Game.Input
         public enum CrouchPressType
         {
             None,
+            Preview,
             Short,
             Long
         }
@@ -23,18 +24,21 @@ namespace Game.Input
         {
             public CrouchPressType PressType { get; }
             public PlayerPosture OriginalPosture { get; }
+            public PlayerPosture TargetPosture { get; }
             public bool IsValid => PressType != CrouchPressType.None;
 
             public CrouchCommand(CrouchPressType pressType, PlayerPosture originalPosture)
             {
                 PressType = pressType;
                 OriginalPosture = originalPosture;
+                TargetPosture = InputReader.ResolveTargetPosture(pressType, originalPosture);
             }
         }
 
         public Vector2 MoveInput { get; private set; }
 
         public bool JumpHeld { get; private set; }
+        public PlayerPosture CurrentPosture => posture;
         public bool IsCrouching => posture == PlayerPosture.Crouching;
         public bool IsLayDown => posture == PlayerPosture.LayDown;
 
@@ -244,74 +248,86 @@ namespace Game.Input
             {
                 LogCrouchDiagnostic(
                     "order.consume",
-                    details: $"order={result.PressType} original={result.OriginalPosture}");
+                    details: $"order={result.PressType} original={result.OriginalPosture} " +
+                        $"target={result.TargetPosture}");
             }
 
             ClearPendingCrouchPress();
             return result;
         }
 
-        public void ApplyPostureTransition(CrouchCommand command)
+        public void CommitPostureTransition(CrouchCommand command, string source)
         {
             if (!command.IsValid) return;
 
-            PlayerPosture previousPosture = posture;
-            switch (command.OriginalPosture)
-            {
-                case PlayerPosture.Standing:
-                    posture = command.PressType == CrouchPressType.Short
-                        ? PlayerPosture.Crouching
-                        : PlayerPosture.LayDown;
-                    break;
-
-                case PlayerPosture.Crouching:
-                    posture = command.PressType == CrouchPressType.Short
-                        ? PlayerPosture.Standing
-                        : PlayerPosture.LayDown;
-                    break;
-
-                case PlayerPosture.LayDown:
-                    posture = command.PressType == CrouchPressType.Short
-                        ? PlayerPosture.Standing
-                        : PlayerPosture.Crouching;
-                    break;
-            }
-
-            LogCrouchDiagnostic(
-                "posture.apply",
-                details: $"order={command.PressType} original={command.OriginalPosture} " +
-                    $"previous={previousPosture} next={posture}");
-
-            if (debugInput && posture != previousPosture)
-                Debug.Log($"[INPUT] POSTURE {previousPosture} -> {posture} ({command.PressType})");
+            CommitPosture(
+                command.TargetPosture,
+                source,
+                $"order={command.PressType} original={command.OriginalPosture}");
         }
 
-        private void ApplyLayDownCrouchPreview()
+        public void CommitPosture(
+            PlayerPosture nextPosture,
+            string source,
+            string commandDetails = null)
         {
             PlayerPosture previousPosture = posture;
-            posture = PlayerPosture.Crouching;
+            posture = nextPosture;
+            string details = string.IsNullOrEmpty(commandDetails)
+                ? string.Empty
+                : $" {commandDetails}";
 
             LogCrouchDiagnostic(
-                "posture.preview",
-                details: $"original={crouchGestureOriginalPosture} " +
-                    $"previous={previousPosture} next={posture} longConfirmed=false");
+                "posture.commit",
+                details: $"source={source} previous={previousPosture} next={posture}{details}");
 
             if (debugInput && posture != previousPosture)
-                Debug.Log($"[INPUT] POSTURE {previousPosture} -> {posture} (preview)");
+                Debug.Log($"[INPUT] POSTURE {previousPosture} -> {posture} ({source})");
         }
 
-        public void ForceStandUp(string source = "Unspecified")
+        public void CancelCrouchGesture(string source = "Unspecified")
         {
-            PlayerPosture previousPosture = posture;
-            posture = PlayerPosture.Standing;
-
             LogCrouchDiagnostic(
-                "force_stand",
-                details: $"source={source} previous={previousPosture} next={posture}");
+                "gesture.cancel",
+                details: $"source={source}");
 
             ResetCrouchPressTracking();
 
-            if (debugInput) Debug.Log("[INPUT] FORCE STAND UP");
+            if (debugInput) Debug.Log($"[INPUT] CROUCH GESTURE CANCELED ({source})");
+        }
+
+        private static PlayerPosture ResolveTargetPosture(
+            CrouchPressType pressType,
+            PlayerPosture originalPosture)
+        {
+            if (pressType == CrouchPressType.None)
+                return originalPosture;
+
+            if (pressType == CrouchPressType.Preview)
+                return originalPosture == PlayerPosture.LayDown
+                    ? PlayerPosture.Crouching
+                    : originalPosture;
+
+            switch (originalPosture)
+            {
+                case PlayerPosture.Standing:
+                    return pressType == CrouchPressType.Short
+                        ? PlayerPosture.Crouching
+                        : PlayerPosture.LayDown;
+
+                case PlayerPosture.Crouching:
+                    return pressType == CrouchPressType.Short
+                        ? PlayerPosture.Standing
+                        : PlayerPosture.LayDown;
+
+                case PlayerPosture.LayDown:
+                    return pressType == CrouchPressType.Short
+                        ? PlayerPosture.Standing
+                        : PlayerPosture.Crouching;
+
+                default:
+                    return originalPosture;
+            }
         }
 
         private void RegisterCrouchPress(CrouchPressType pressType)
@@ -320,12 +336,19 @@ namespace Game.Input
             CrouchCommand command = new CrouchCommand(pressType, crouchGestureOriginalPosture);
             if (pendingCrouchCommand.IsValid)
             {
-                if (pressType == CrouchPressType.Long &&
-                    pendingCrouchCommand.PressType == CrouchPressType.Short)
+                bool replacesPreview =
+                    pendingCrouchCommand.PressType == CrouchPressType.Preview &&
+                    pressType != CrouchPressType.Preview;
+                bool longReplacesShort =
+                    pendingCrouchCommand.PressType == CrouchPressType.Short &&
+                    pressType == CrouchPressType.Long;
+                if (replacesPreview || longReplacesShort)
                 {
                     LogCrouchDiagnostic(
                         "order.replace",
-                        details: $"previous=Short next=Long original={command.OriginalPosture}");
+                        details: $"previous={pendingCrouchCommand.PressType} " +
+                            $"next={pressType} original={command.OriginalPosture} " +
+                            $"target={command.TargetPosture}");
                     pendingCrouchCommand = command;
                     pendingCrouchPressFrame = Time.frameCount;
                     return;
@@ -341,7 +364,8 @@ namespace Game.Input
             pendingCrouchPressFrame = Time.frameCount;
             LogCrouchDiagnostic(
                 "order.register",
-                details: $"order={pressType} original={command.OriginalPosture}");
+                details: $"order={pressType} original={command.OriginalPosture} " +
+                    $"target={command.TargetPosture}");
         }
 
         private void ExpirePendingCrouchPress()
@@ -525,7 +549,7 @@ namespace Game.Input
                 $"phase={ctx.phase} original={crouchGestureOriginalPosture} " +
                 $"resolution={resolution}");
             if (previewCrouchingFromLayDown)
-                ApplyLayDownCrouchPreview();
+                RegisterCrouchPress(CrouchPressType.Preview);
             else if (!deferShortUntilCanceled)
                 RegisterCrouchPress(CrouchPressType.Short);
 
