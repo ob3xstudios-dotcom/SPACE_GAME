@@ -82,6 +82,7 @@ MonoBehaviour:
   input: {fileID: 2936266359909524095}
   stats: {fileID: 11400000, guid: c1a3ff2a6b46f804a83c4120aaf6fba1, type: 2}
   debugLogs: 0
+  showSprintDebugOverlay: 1
   stamina: {fileID: 0}
   dashStaminaCost: 1
   visualRoot: {fileID: 0}
@@ -193,6 +194,12 @@ MonoBehaviour:
   pogoBounceForce: 12
   crouchSpeedMultiplier: 0.6
   layDownSpeedMultiplier: 0.35
+  sprintSpeedMultiplier: 1.4
+  sprintMaxDuration: 1
+  sprintRegenDelay: 1
+  sprintFullRechargeTime: 4
+  sprintMomentumDuration: 0.7
+  sprintLandingMomentumDuration: 0.7
   parryMoveStopDecel: 90
   carryingMoveSpeedMultiplier: 0.65
   carryingJumpForceMultiplier: 0.5

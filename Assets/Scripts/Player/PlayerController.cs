@@ -40,6 +40,7 @@ namespace Game.Player
 
         [Header("Debug")]
         public bool debugLogs = false;
+        [SerializeField] private bool showSprintDebugOverlay = true;
 
         [Header("Stamina")]
         [SerializeField] private PlayerStamina stamina;
@@ -226,6 +227,12 @@ namespace Game.Player
         [Header("Stealth Movement")]
         [SerializeField, Range(0.1f, 1f)] private float crouchSpeedMultiplier = 0.6f;
         [SerializeField, Range(0.1f, 1f)] private float layDownSpeedMultiplier = 0.35f;
+        [SerializeField, Min(1f)] private float sprintSpeedMultiplier = 1.4f;
+        [SerializeField, Min(0f)] private float sprintMaxDuration = 1f;
+        [SerializeField, Min(0f)] private float sprintRegenDelay = 1f;
+        [SerializeField, Min(0.01f)] private float sprintFullRechargeTime = 4f;
+        [SerializeField, Min(0f)] private float sprintMomentumDuration = 0.7f;
+        [SerializeField, Min(0f)] private float sprintLandingMomentumDuration = 0.7f;
 
         // --------------------
         // PARRY / MOVE LOCK
@@ -320,6 +327,15 @@ namespace Game.Player
         private bool dashStartedGrounded;
         private int dashHorizontalSign;
         private bool dashFollowingSlope;
+        private float sprintRemaining;
+        private float sprintRegenDelayTimer;
+        private bool sprintActive;
+        private bool sprintExhaustedUntilRelease;
+        private bool sprintWasGrounded;
+        private float sprintMomentumTimer;
+        private float sprintLandingMomentumTimer;
+        private float sprintMomentumSpeed;
+        private int sprintMomentumDirection;
 
         private float wallJumpLockTimer;
         private float defaultGravityScale;
@@ -437,6 +453,7 @@ namespace Game.Player
             jumpBufferTimer = 0f;
             dashTimer = 0f;
             dashCooldownTimer = 0f;
+            ResetSprintState(true);
             wallJumpLockTimer = 0f;
             wallStickTimer = 0f;
             wallCoyoteTimer = 0f;
@@ -508,6 +525,8 @@ namespace Game.Player
                 defaultGravityScale = rb.gravityScale;
                 airDashesRemaining = stats.airDashesMax;
             }
+
+            ResetSprintState(true);
 
             if (attackPoint != null)
                 attackPointLocalXAbs = Mathf.Abs(attackPoint.localPosition.x);
@@ -894,22 +913,36 @@ namespace Game.Player
         {
             if (stats == null || input == null) return;
 
-            if (isHanging) return;
+            if (isHanging)
+            {
+                UpdateSprintTimers(Time.fixedDeltaTime);
+                sprintActive = false;
+                sprintWasGrounded = isGrounded;
+                return;
+            }
 
             if (isSwinging)
             {
+                UpdateSprintTimers(Time.fixedDeltaTime);
+                sprintActive = false;
+                sprintWasGrounded = isGrounded;
                 FixedUpdateSwinging();
                 return;
             }
 
             if (isDashing)
             {
+                UpdateSprintTimers(Time.fixedDeltaTime);
+                sprintActive = false;
+                sprintWasGrounded = isGrounded;
                 UpdateDash();
                 return;
             }
 
             suppressWallSlideThisFixed = false;
             CheckGround();
+            UpdateSprintTimers(Time.fixedDeltaTime);
+            UpdateSprintState();
             UpdateRecentlyGroundedTimer(Time.fixedDeltaTime);
             HandleCornerAntiStuck();
             HandleWallSlide();
@@ -1140,6 +1173,7 @@ namespace Game.Player
                 return false;
 
             DropCarriedObject();
+            ClearSprintMomentum();
             EnterSwing(pole);
             return true;
         }
@@ -1454,6 +1488,167 @@ namespace Game.Player
         // --------------------
         // MOVE / PHYSICS
         // --------------------
+        private void UpdateSprintTimers(float deltaTime)
+        {
+            if (isGrounded)
+            {
+                sprintMomentumTimer = Mathf.Max(0f, sprintMomentumTimer - deltaTime);
+                sprintLandingMomentumTimer = Mathf.Max(0f, sprintLandingMomentumTimer - deltaTime);
+            }
+
+            if (sprintActive)
+            {
+                sprintRegenDelayTimer = Mathf.Max(0f, sprintRegenDelayTimer - deltaTime);
+                return;
+            }
+
+            sprintRegenDelayTimer = Mathf.Max(0f, sprintRegenDelayTimer - deltaTime);
+            if (sprintRegenDelayTimer > 0f) return;
+
+            float maxDuration = Mathf.Max(0f, sprintMaxDuration);
+            float rechargeTime = Mathf.Max(0.01f, sprintFullRechargeTime);
+            sprintRemaining = Mathf.MoveTowards(
+                sprintRemaining,
+                maxDuration,
+                maxDuration / rechargeTime * deltaTime
+            );
+        }
+
+        private void UpdateSprintState()
+        {
+            bool justLanded = !sprintWasGrounded && isGrounded;
+            bool wasActive = sprintActive;
+
+            bool hasHorizontalRequest = Mathf.Abs(input.MoveInput.x) > 0.01f;
+            bool canSprint =
+                isGrounded &&
+                !IsCrouching &&
+                !IsLayDown &&
+                !isWallSliding &&
+                !IsMoveLockedByParry &&
+                hasHorizontalRequest &&
+                input.SprintHeld &&
+                !sprintExhaustedUntilRelease;
+
+            float minimumActivation = Mathf.Max(Time.fixedDeltaTime, 0.0001f);
+            bool hasReserve = sprintRemaining > minimumActivation;
+            sprintActive = canSprint && hasReserve;
+
+            if (!input.SprintHeld)
+                sprintExhaustedUntilRelease = false;
+
+            if (sprintActive)
+            {
+                sprintRemaining = Mathf.Max(0f, sprintRemaining - Time.fixedDeltaTime);
+                sprintRegenDelayTimer = Mathf.Max(0f, sprintRegenDelay);
+
+                if (sprintRemaining <= 0.0001f)
+                {
+                    sprintRemaining = 0f;
+                    sprintActive = false;
+                    sprintExhaustedUntilRelease = true;
+                }
+            }
+
+            if (wasActive && !sprintActive)
+                CaptureSprintMomentum();
+
+            if (justLanded && HasSprintMomentum())
+                sprintLandingMomentumTimer = Mathf.Max(
+                    sprintLandingMomentumTimer,
+                    Mathf.Max(0f, sprintLandingMomentumDuration)
+                );
+
+            sprintWasGrounded = isGrounded;
+        }
+
+        private void CaptureSprintMomentum()
+        {
+            float speed = Mathf.Abs(rb.velocity.x);
+            if (speed <= Mathf.Max(stats.maxRunSpeed, 0f) + 0.01f)
+                return;
+
+            sprintMomentumSpeed = speed;
+            sprintMomentumDirection = rb.velocity.x >= 0f ? 1 : -1;
+            sprintMomentumTimer = Mathf.Max(
+                sprintMomentumTimer,
+                Mathf.Max(0f, sprintMomentumDuration)
+            );
+        }
+
+        private bool HasSprintMomentum()
+        {
+            return sprintMomentumDirection != 0 &&
+                (sprintMomentumTimer > 0f || sprintLandingMomentumTimer > 0f);
+        }
+
+        private float ApplySprintMomentumTarget(float inputX, float targetSpeed)
+        {
+            if (!HasSprintMomentum() || IsCrouching || IsLayDown)
+                return targetSpeed;
+
+            bool opposingInput =
+                Mathf.Abs(inputX) > 0.01f &&
+                Mathf.Sign(inputX) != sprintMomentumDirection;
+            if (opposingInput)
+                return targetSpeed;
+
+            float duration = Mathf.Max(
+                0.01f,
+                Mathf.Max(sprintMomentumDuration, sprintLandingMomentumDuration)
+            );
+            float remaining = Mathf.Max(sprintMomentumTimer, sprintLandingMomentumTimer);
+            float progress = Mathf.Clamp01(remaining / duration);
+            float normalMagnitude = Mathf.Abs(targetSpeed);
+            float momentumMagnitude = Mathf.Lerp(normalMagnitude, sprintMomentumSpeed, progress);
+            if (Mathf.Abs(inputX) <= 0.01f)
+                normalMagnitude = 0f;
+
+            momentumMagnitude = Mathf.Max(normalMagnitude, momentumMagnitude);
+            return sprintMomentumDirection * momentumMagnitude;
+        }
+
+        private void UpdateSprintMomentumFromVelocity(float horizontalVelocity)
+        {
+            if (!HasSprintMomentum()) return;
+
+            if (Mathf.Abs(horizontalVelocity) <= 0.05f ||
+                Mathf.Sign(horizontalVelocity) != sprintMomentumDirection)
+            {
+                ClearSprintResidualMomentum();
+                return;
+            }
+
+            sprintMomentumSpeed = Mathf.Abs(horizontalVelocity);
+        }
+
+        private void ResetSprintState(bool refill)
+        {
+            sprintActive = false;
+            sprintExhaustedUntilRelease = false;
+            sprintRegenDelayTimer = 0f;
+            sprintWasGrounded = false;
+            sprintMomentumTimer = 0f;
+            sprintLandingMomentumTimer = 0f;
+            sprintMomentumSpeed = 0f;
+            sprintMomentumDirection = 0;
+            sprintRemaining = refill ? Mathf.Max(0f, sprintMaxDuration) : 0f;
+        }
+
+        private void ClearSprintMomentum()
+        {
+            sprintActive = false;
+            ClearSprintResidualMomentum();
+        }
+
+        private void ClearSprintResidualMomentum()
+        {
+            sprintMomentumTimer = 0f;
+            sprintLandingMomentumTimer = 0f;
+            sprintMomentumSpeed = 0f;
+            sprintMomentumDirection = 0;
+        }
+
         private void Move()
         {
             float inputX = Mathf.Clamp(input.MoveInput.x, -1f, 1f);
@@ -1468,9 +1663,11 @@ namespace Game.Player
             float stanceMult = 1f;
             if (IsLayDown) stanceMult = layDownSpeedMultiplier;
             else if (IsCrouching) stanceMult = crouchSpeedMultiplier;
+            else if (sprintActive) stanceMult = sprintSpeedMultiplier;
             if (IsCarrying) stanceMult *= carryingMoveSpeedMultiplier;
 
             float targetSpeed = inputX * stats.maxRunSpeed * stanceMult;
+            targetSpeed = ApplySprintMomentumTarget(inputX, targetSpeed);
             if (hasPendingNormalJump)
                 targetSpeed *= jumpAnticipationMoveSpeedMultiplier;
 
@@ -1519,6 +1716,7 @@ namespace Game.Player
                 rb.velocity =
                     tangent * newSurfaceSpeed -
                     groundNormal * slopeStickSpeed;
+                UpdateSprintMomentumFromVelocity(rb.velocity.x);
                 wasUsingSlopeMovementLastMove = true;
                 return;
             }
@@ -1548,6 +1746,7 @@ namespace Game.Player
                 newVelX = 0f;
 
             rb.velocity = new Vector2(newVelX, rb.velocity.y);
+            UpdateSprintMomentumFromVelocity(newVelX);
         }
 
         private void ApplyFacing(int dir)
@@ -1679,6 +1878,7 @@ namespace Game.Player
         private void TryStartDash()
         {
             if (isSwinging) return;
+            if (IsCrouching || IsLayDown) return;
             if (isDashing) return;
             if (dashCooldownTimer > 0f) return;
             if (!CanSpendDashStamina()) return;
@@ -1696,6 +1896,7 @@ namespace Game.Player
 
         private void StartDash()
         {
+            ClearSprintMomentum();
             dashStartedGrounded =
                 isGrounded &&
                 !slopeMovementSuppressedUntilAirborne;
@@ -2060,6 +2261,8 @@ namespace Game.Player
             int jumpedWallSide = activeWallSide;
             Collider2D jumpedWallCollider = GetWallColliderOnSide(jumpedWallSide);
             if (IsSameWallClimbBlocked(jumpedWallSide, jumpedWallCollider)) return;
+
+            ClearSprintMomentum();
 
             float jumpMult = IsCarrying ? carryingJumpForceMultiplier : 1f;
             float wallJumpForceX = stats.wallJumpForceX;
@@ -2867,6 +3070,7 @@ namespace Game.Player
 
         private void EnterHang(Vector2 lockedPos, Vector2 corner, bool hasClimbPosition, Vector2 climbPosition, LedgeGrabPoint sourcePoint)
         {
+            ClearSprintMomentum();
             isHanging = true;
             isWallSliding = false;
             ledgeCandidateTimer = 0f;
@@ -3131,6 +3335,63 @@ namespace Game.Player
                 Gizmos.DrawWireSphere(ledgeDebugHangPos, 0.1f);
                 Gizmos.DrawLine(transform.position, ledgeDebugHangPos);
             }
+        }
+
+        private void OnGUI()
+        {
+            if (!Application.isPlaying || !showSprintDebugOverlay) return;
+
+            float maxDuration = Mathf.Max(0f, sprintMaxDuration);
+            float remaining = Mathf.Clamp(sprintRemaining, 0f, maxDuration);
+            float fill = maxDuration > 0.0001f ? remaining / maxDuration : 0f;
+            float velocityX = rb != null ? rb.velocity.x : 0f;
+            string posture = IsLayDown ? "LayDown" : IsCrouching ? "Crouching" : "Standing";
+
+            List<string> states = new List<string>();
+            if (sprintActive) states.Add("ACTIVE");
+            else states.Add("INACTIVE");
+
+            if (sprintExhaustedUntilRelease)
+                states.Add("BLOCKED UNTIL RELEASE");
+            else if (!sprintActive && sprintRegenDelayTimer > 0f)
+                states.Add("WAITING REGEN");
+            else if (!sprintActive && remaining < maxDuration - 0.0001f)
+                states.Add("REGENERATING");
+            else if (!sprintActive && remaining >= maxDuration - 0.0001f)
+                states.Add("FULL");
+
+            bool hasMomentum = HasSprintMomentum();
+            Rect panel = new Rect(12f, 12f, 360f, 214f);
+            Rect bar = new Rect(panel.x + 12f, panel.y + 38f, panel.width - 24f, 18f);
+            Rect fillRect = new Rect(bar.x, bar.y, bar.width * fill, bar.height);
+
+            Color previousColor = GUI.color;
+            GUI.color = new Color(0f, 0f, 0f, 0.78f);
+            GUI.Box(panel, "SPRINT DEBUG");
+
+            GUI.color = new Color(0.12f, 0.12f, 0.12f, 1f);
+            GUI.Box(bar, GUIContent.none);
+            GUI.color = sprintActive ? new Color(0.2f, 0.85f, 0.35f, 1f) :
+                new Color(0.25f, 0.65f, 0.95f, 1f);
+            GUI.DrawTexture(fillRect, Texture2D.whiteTexture);
+            GUI.color = Color.white;
+
+            GUI.Label(new Rect(panel.x + 12f, panel.y + 60f, panel.width - 24f, 18f),
+                $"Sprint: {remaining:0.00} / {maxDuration:0.00} s ({fill * 100f:0}%)");
+            GUI.Label(new Rect(panel.x + 12f, panel.y + 80f, panel.width - 24f, 18f),
+                $"State: {string.Join(" | ", states)}");
+            GUI.Label(new Rect(panel.x + 12f, panel.y + 100f, panel.width - 24f, 18f),
+                $"Regen delay: {sprintRegenDelayTimer:0.00} s | Held: {input != null && input.SprintHeld}");
+            GUI.Label(new Rect(panel.x + 12f, panel.y + 120f, panel.width - 24f, 18f),
+                $"Momentum: {(hasMomentum ? "YES" : "NO")} | air: {sprintMomentumTimer:0.00} s | landing: {sprintLandingMomentumTimer:0.00} s");
+            GUI.Label(new Rect(panel.x + 12f, panel.y + 140f, panel.width - 24f, 18f),
+                $"Velocity X: {velocityX:+0.00;-0.00;0.00}");
+            GUI.Label(new Rect(panel.x + 12f, panel.y + 160f, panel.width - 24f, 18f),
+                $"Physics: {(isGrounded ? "Grounded" : "Airborne")} | Posture: {posture}");
+            GUI.Label(new Rect(panel.x + 12f, panel.y + 180f, panel.width - 24f, 18f),
+                $"Momentum direction: {sprintMomentumDirection:+0;-0;0}");
+
+            GUI.color = previousColor;
         }
 
         private void DrawWallProbeGizmos(CapsuleCollider2D sourceCapsule)

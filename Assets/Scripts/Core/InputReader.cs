@@ -38,6 +38,7 @@ namespace Game.Input
         public Vector2 MoveInput { get; private set; }
 
         public bool JumpHeld { get; private set; }
+        public bool SprintHeld { get; private set; }
         public PlayerPosture CurrentPosture => posture;
         public bool IsCrouching => posture == PlayerPosture.Crouching;
         public bool IsLayDown => posture == PlayerPosture.LayDown;
@@ -85,6 +86,8 @@ namespace Game.Input
 
             actions.Gameplay.Jump.started += OnJumpStarted;
             actions.Gameplay.Jump.canceled += OnJumpCanceled;
+            actions.Gameplay.Sprint.started += OnSprintStarted;
+            actions.Gameplay.Sprint.canceled += OnSprintCanceled;
 
             actions.Gameplay.Attack.started += OnAttackStarted;
             actions.Gameplay.Dash.started += OnDashStarted;
@@ -108,6 +111,7 @@ namespace Game.Input
         private void OnDisable()
         {
             ResetCrouchPressTracking();
+            SprintHeld = false;
 
             if (actions == null) return;
 
@@ -116,6 +120,8 @@ namespace Game.Input
 
             actions.Gameplay.Jump.started -= OnJumpStarted;
             actions.Gameplay.Jump.canceled -= OnJumpCanceled;
+            actions.Gameplay.Sprint.started -= OnSprintStarted;
+            actions.Gameplay.Sprint.canceled -= OnSprintCanceled;
 
             actions.Gameplay.Attack.started -= OnAttackStarted;
             actions.Gameplay.Dash.started -= OnDashStarted;
@@ -450,6 +456,20 @@ namespace Game.Input
         private void OnJumpCanceled(InputAction.CallbackContext ctx)
         {
             JumpHeld = false;
+        }
+
+        private void OnSprintStarted(InputAction.CallbackContext ctx)
+        {
+            SprintHeld = true;
+
+            if (debugInput) Debug.Log("[INPUT] SPRINT started");
+        }
+
+        private void OnSprintCanceled(InputAction.CallbackContext ctx)
+        {
+            SprintHeld = false;
+
+            if (debugInput) Debug.Log("[INPUT] SPRINT canceled");
         }
 
         private void OnAttackStarted(InputAction.CallbackContext ctx)

@@ -122,6 +122,15 @@ namespace Game.Input
                     ""initialStateCheck"": false
                 },
                 {
+                    ""name"": ""Sprint"",
+                    ""type"": ""Button"",
+                    ""id"": ""e0db6d4c-00f7-4d56-a0f9-fcbd3a9f0e13"",
+                    ""expectedControlType"": """",
+                    ""processors"": """",
+                    ""interactions"": """",
+                    ""initialStateCheck"": false
+                },
+                {
                     ""name"": ""Attack"",
                     ""type"": ""Button"",
                     ""id"": ""8ece260d-3799-4958-9ff7-e57f2110705c"",
@@ -368,6 +377,28 @@ namespace Game.Input
                 },
                 {
                     ""name"": """",
+                    ""id"": ""5a69a46c-68d1-45c1-b5e9-0d9e5dce1b7a"",
+                    ""path"": ""<Keyboard>/capsLock"",
+                    ""interactions"": """",
+                    ""processors"": """",
+                    ""groups"": """",
+                    ""action"": ""Sprint"",
+                    ""isComposite"": false,
+                    ""isPartOfComposite"": false
+                },
+                {
+                    ""name"": """",
+                    ""id"": ""2f9eb7d7-bf58-4df8-a4b2-56f4b6ac1f22"",
+                    ""path"": ""<Gamepad>/leftStickPress"",
+                    ""interactions"": """",
+                    ""processors"": """",
+                    ""groups"": """",
+                    ""action"": ""Sprint"",
+                    ""isComposite"": false,
+                    ""isPartOfComposite"": false
+                },
+                {
+                    ""name"": """",
                     ""id"": ""c890dc80-8f96-4394-83b8-771022a88073"",
                     ""path"": ""<Gamepad>/buttonNorth"",
                     ""interactions"": """",
@@ -464,6 +495,7 @@ namespace Game.Input
             m_Gameplay_Move = m_Gameplay.FindAction("Move", throwIfNotFound: true);
             m_Gameplay_Jump = m_Gameplay.FindAction("Jump", throwIfNotFound: true);
             m_Gameplay_Dash = m_Gameplay.FindAction("Dash", throwIfNotFound: true);
+            m_Gameplay_Sprint = m_Gameplay.FindAction("Sprint", throwIfNotFound: true);
             m_Gameplay_Attack = m_Gameplay.FindAction("Attack", throwIfNotFound: true);
             m_Gameplay_Interact = m_Gameplay.FindAction("Interact", throwIfNotFound: true);
             m_Gameplay_Parry = m_Gameplay.FindAction("Parry", throwIfNotFound: true);
@@ -552,6 +584,7 @@ namespace Game.Input
         private readonly InputAction m_Gameplay_Move;
         private readonly InputAction m_Gameplay_Jump;
         private readonly InputAction m_Gameplay_Dash;
+        private readonly InputAction m_Gameplay_Sprint;
         private readonly InputAction m_Gameplay_Attack;
         private readonly InputAction m_Gameplay_Interact;
         private readonly InputAction m_Gameplay_Parry;
@@ -580,6 +613,10 @@ namespace Game.Input
             /// Provides access to the underlying input action "Gameplay/Dash".
             /// </summary>
             public InputAction @Dash => m_Wrapper.m_Gameplay_Dash;
+            /// <summary>
+            /// Provides access to the underlying input action "Gameplay/Sprint".
+            /// </summary>
+            public InputAction @Sprint => m_Wrapper.m_Gameplay_Sprint;
             /// <summary>
             /// Provides access to the underlying input action "Gameplay/Attack".
             /// </summary>
@@ -635,6 +672,9 @@ namespace Game.Input
                 @Dash.started += instance.OnDash;
                 @Dash.performed += instance.OnDash;
                 @Dash.canceled += instance.OnDash;
+                @Sprint.started += instance.OnSprint;
+                @Sprint.performed += instance.OnSprint;
+                @Sprint.canceled += instance.OnSprint;
                 @Attack.started += instance.OnAttack;
                 @Attack.performed += instance.OnAttack;
                 @Attack.canceled += instance.OnAttack;
@@ -670,6 +710,9 @@ namespace Game.Input
                 @Dash.started -= instance.OnDash;
                 @Dash.performed -= instance.OnDash;
                 @Dash.canceled -= instance.OnDash;
+                @Sprint.started -= instance.OnSprint;
+                @Sprint.performed -= instance.OnSprint;
+                @Sprint.canceled -= instance.OnSprint;
                 @Attack.started -= instance.OnAttack;
                 @Attack.performed -= instance.OnAttack;
                 @Attack.canceled -= instance.OnAttack;
@@ -746,6 +789,13 @@ namespace Game.Input
             /// <seealso cref="UnityEngine.InputSystem.InputAction.performed" />
             /// <seealso cref="UnityEngine.InputSystem.InputAction.canceled" />
             void OnDash(InputAction.CallbackContext context);
+            /// <summary>
+            /// Method invoked when associated input action "Sprint" is either <see cref="UnityEngine.InputSystem.InputAction.started" />, <see cref="UnityEngine.InputSystem.InputAction.performed" /> or <see cref="UnityEngine.InputSystem.InputAction.canceled" />.
+            /// </summary>
+            /// <seealso cref="UnityEngine.InputSystem.InputAction.started" />
+            /// <seealso cref="UnityEngine.InputSystem.InputAction.performed" />
+            /// <seealso cref="UnityEngine.InputSystem.InputAction.canceled" />
+            void OnSprint(InputAction.CallbackContext context);
             /// <summary>
             /// Method invoked when associated input action "Attack" is either <see cref="UnityEngine.InputSystem.InputAction.started" />, <see cref="UnityEngine.InputSystem.InputAction.performed" /> or <see cref="UnityEngine.InputSystem.InputAction.canceled" />.
             /// </summary>
