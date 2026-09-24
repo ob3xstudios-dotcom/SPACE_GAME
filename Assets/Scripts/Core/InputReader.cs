@@ -5,32 +5,63 @@ namespace Game.Input
 {
     public class InputReader : MonoBehaviour
     {
+        public enum CrouchPressType
+        {
+            None,
+            Short,
+            Long
+        }
+
+        public enum PlayerPosture
+        {
+            Standing,
+            Crouching,
+            LayDown
+        }
+
+        public struct CrouchCommand
+        {
+            public CrouchPressType PressType { get; }
+            public PlayerPosture OriginalPosture { get; }
+            public bool IsValid => PressType != CrouchPressType.None;
+
+            public CrouchCommand(CrouchPressType pressType, PlayerPosture originalPosture)
+            {
+                PressType = pressType;
+                OriginalPosture = originalPosture;
+            }
+        }
+
         public Vector2 MoveInput { get; private set; }
 
         public bool JumpHeld { get; private set; }
-        public bool IsCrouching { get; private set; }
-        public bool IsLayDown { get; private set; }
+        public bool IsCrouching => posture == PlayerPosture.Crouching;
+        public bool IsLayDown => posture == PlayerPosture.LayDown;
 
         private bool jumpPressed;
         private bool attackPressed;
         private bool dashPressed;
         private bool parryPressed;
         private bool interactPressed;
-        private bool crouchPressed;
         private int swingGrabPressedFrame = -1;
         private int swingGrabConsumedFrame = -1;
 
         [Header("Crouch / LayDown")]
-        [SerializeField, Range(0.2f, 5f)] private float holdSecondsForLayDown = 2f;
+        [SerializeField, Range(0.2f, 5f)] private float holdSecondsForLayDown = 0.4f;
 
         [Header("Debug")]
         [SerializeField] private bool debugInput = false;
 
         private PlayerInputActions actions;
 
+        private PlayerPosture posture;
+        private PlayerPosture crouchGestureOriginalPosture;
         private bool crouchHeld;
         private float crouchHoldTimer;
-        private bool layDownTriggeredThisHold;
+        private bool longCrouchTriggeredThisHold;
+        private CrouchCommand pendingCrouchCommand;
+        private int pendingCrouchPressFrame = -1;
+        private string activeCrouchControlPath = "<none>";
 
         private void Awake()
         {
@@ -60,6 +91,7 @@ namespace Game.Input
             actions.Gameplay.SwingGrab.started += OnSwingGrabStarted;
 
             actions.Gameplay.Crouch.started += OnCrouchStarted;
+            actions.Gameplay.Crouch.performed += OnCrouchPerformed;
             actions.Gameplay.Crouch.canceled += OnCrouchCanceled;
 
             if (debugInput)
@@ -71,6 +103,8 @@ namespace Game.Input
 
         private void OnDisable()
         {
+            ResetCrouchPressTracking();
+
             if (actions == null) return;
 
             actions.Gameplay.Move.performed -= OnMovePerformed;
@@ -88,6 +122,7 @@ namespace Game.Input
             actions.Gameplay.SwingGrab.started -= OnSwingGrabStarted;
 
             actions.Gameplay.Crouch.started -= OnCrouchStarted;
+            actions.Gameplay.Crouch.performed -= OnCrouchPerformed;
             actions.Gameplay.Crouch.canceled -= OnCrouchCanceled;
 
             actions.Gameplay.Disable();
@@ -105,6 +140,8 @@ namespace Game.Input
         {
             if (swingGrabPressedFrame >= 0 && swingGrabPressedFrame != Time.frameCount)
                 swingGrabPressedFrame = -1;
+
+            ExpirePendingCrouchPress();
 
             // FALLBACK DIRECTO: si los callbacks no llegan, esto debería detectarlo.
             if (actions != null && actions.Gameplay.Parry.WasPressedThisFrame())
@@ -125,29 +162,19 @@ namespace Game.Input
                 if (debugInput) Debug.Log("[INPUT] SWING GRAB WasPressedThisFrame");
             }
 
-            if (!crouchHeld)
-            {
-                crouchHoldTimer = 0f;
-                layDownTriggeredThisHold = false;
-                return;
-            }
-
-            if (!IsCrouching && !IsLayDown)
-            {
-                crouchHoldTimer = 0f;
-                layDownTriggeredThisHold = false;
-                return;
-            }
+            if (!crouchHeld || longCrouchTriggeredThisHold) return;
 
             crouchHoldTimer += Time.deltaTime;
 
-            if (!layDownTriggeredThisHold && crouchHoldTimer >= holdSecondsForLayDown)
+            if (crouchHoldTimer >= holdSecondsForLayDown)
             {
-                IsLayDown = true;
-                IsCrouching = false;
-                layDownTriggeredThisHold = true;
+                longCrouchTriggeredThisHold = true;
+                LogCrouchDiagnostic(
+                    "long.begin",
+                    details: $"threshold={holdSecondsForLayDown:0.###}");
+                RegisterCrouchPress(CrouchPressType.Long);
 
-                if (debugInput) Debug.Log("[INPUT] LAYDOWN ON");
+                if (debugInput) Debug.Log("[INPUT] CROUCH long");
             }
         }
 
@@ -208,43 +235,174 @@ namespace Game.Input
             swingGrabPressedFrame = currentFrame;
         }
 
-        public bool ConsumeCrouchPressed()
+        public CrouchCommand ConsumeCrouchPress()
         {
-            if (!crouchPressed) return false;
-            crouchPressed = false;
-            return true;
+            ExpirePendingCrouchPress();
+
+            CrouchCommand result = pendingCrouchCommand;
+            if (result.IsValid)
+            {
+                LogCrouchDiagnostic(
+                    "order.consume",
+                    details: $"order={result.PressType} original={result.OriginalPosture}");
+            }
+
+            ClearPendingCrouchPress();
+            return result;
         }
 
-        public void ToggleCrouch()
+        public void ApplyPostureTransition(CrouchCommand command)
         {
-            if (IsLayDown)
+            if (!command.IsValid) return;
+
+            PlayerPosture previousPosture = posture;
+            switch (command.OriginalPosture)
             {
-                IsLayDown = false;
-                IsCrouching = true;
-            }
-            else if (IsCrouching)
-            {
-                IsCrouching = false;
-            }
-            else
-            {
-                IsCrouching = true;
+                case PlayerPosture.Standing:
+                    posture = command.PressType == CrouchPressType.Short
+                        ? PlayerPosture.Crouching
+                        : PlayerPosture.LayDown;
+                    break;
+
+                case PlayerPosture.Crouching:
+                    posture = command.PressType == CrouchPressType.Short
+                        ? PlayerPosture.Standing
+                        : PlayerPosture.LayDown;
+                    break;
+
+                case PlayerPosture.LayDown:
+                    posture = command.PressType == CrouchPressType.Short
+                        ? PlayerPosture.Standing
+                        : PlayerPosture.Crouching;
+                    break;
             }
 
-            if (debugInput)
-                Debug.Log($"[INPUT] CROUCH toggle | crouch={IsCrouching} layDown={IsLayDown}");
+            LogCrouchDiagnostic(
+                "posture.apply",
+                details: $"order={command.PressType} original={command.OriginalPosture} " +
+                    $"previous={previousPosture} next={posture}");
+
+            if (debugInput && posture != previousPosture)
+                Debug.Log($"[INPUT] POSTURE {previousPosture} -> {posture} ({command.PressType})");
         }
 
-        public void ForceStandUp()
+        private void ApplyLayDownCrouchPreview()
         {
-            IsCrouching = false;
-            IsLayDown = false;
-            crouchPressed = false;
-            crouchHeld = false;
-            crouchHoldTimer = 0f;
-            layDownTriggeredThisHold = false;
+            PlayerPosture previousPosture = posture;
+            posture = PlayerPosture.Crouching;
+
+            LogCrouchDiagnostic(
+                "posture.preview",
+                details: $"original={crouchGestureOriginalPosture} " +
+                    $"previous={previousPosture} next={posture} longConfirmed=false");
+
+            if (debugInput && posture != previousPosture)
+                Debug.Log($"[INPUT] POSTURE {previousPosture} -> {posture} (preview)");
+        }
+
+        public void ForceStandUp(string source = "Unspecified")
+        {
+            PlayerPosture previousPosture = posture;
+            posture = PlayerPosture.Standing;
+
+            LogCrouchDiagnostic(
+                "force_stand",
+                details: $"source={source} previous={previousPosture} next={posture}");
+
+            ResetCrouchPressTracking();
 
             if (debugInput) Debug.Log("[INPUT] FORCE STAND UP");
+        }
+
+        private void RegisterCrouchPress(CrouchPressType pressType)
+        {
+            ExpirePendingCrouchPress();
+            CrouchCommand command = new CrouchCommand(pressType, crouchGestureOriginalPosture);
+            if (pendingCrouchCommand.IsValid)
+            {
+                if (pressType == CrouchPressType.Long &&
+                    pendingCrouchCommand.PressType == CrouchPressType.Short)
+                {
+                    LogCrouchDiagnostic(
+                        "order.replace",
+                        details: $"previous=Short next=Long original={command.OriginalPosture}");
+                    pendingCrouchCommand = command;
+                    pendingCrouchPressFrame = Time.frameCount;
+                    return;
+                }
+
+                LogCrouchDiagnostic(
+                    "order.register_ignored",
+                    details: $"requested={pressType} pending={pendingCrouchCommand.PressType}");
+                return;
+            }
+
+            pendingCrouchCommand = command;
+            pendingCrouchPressFrame = Time.frameCount;
+            LogCrouchDiagnostic(
+                "order.register",
+                details: $"order={pressType} original={command.OriginalPosture}");
+        }
+
+        private void ExpirePendingCrouchPress()
+        {
+            if (!pendingCrouchCommand.IsValid) return;
+            if (Time.frameCount - pendingCrouchPressFrame <= 1) return;
+
+            LogCrouchDiagnostic(
+                "order.expire",
+                details: $"order={pendingCrouchCommand.PressType} " +
+                    $"original={pendingCrouchCommand.OriginalPosture} " +
+                    $"registeredFrame={pendingCrouchPressFrame}");
+            ClearPendingCrouchPress();
+        }
+
+        private void ClearPendingCrouchPress()
+        {
+            pendingCrouchCommand = default;
+            pendingCrouchPressFrame = -1;
+        }
+
+        private void ResetCrouchPressTracking()
+        {
+            crouchHeld = false;
+            crouchHoldTimer = 0f;
+            longCrouchTriggeredThisHold = false;
+            ClearPendingCrouchPress();
+            activeCrouchControlPath = "<none>";
+        }
+
+        private void LogCrouchDiagnostic(
+            string eventName,
+            string controlPath = null,
+            float? controlValue = null,
+            string details = null)
+        {
+            if (!debugInput) return;
+
+            string resolvedControl = controlPath ?? GetCurrentCrouchControlPath();
+            float resolvedValue = controlValue ?? GetCurrentCrouchValue();
+            string suffix = string.IsNullOrEmpty(details) ? string.Empty : $" {details}";
+
+            Debug.Log(
+                $"[INPUT][CROUCH] frame={Time.frameCount} event={eventName} " +
+                $"control={resolvedControl} value={resolvedValue:0.###} posture={posture} " +
+                $"held={crouchHeld} long={longCrouchTriggeredThisHold} " +
+                $"pending={pendingCrouchCommand.PressType}{suffix}");
+        }
+
+        private string GetCurrentCrouchControlPath()
+        {
+            if (actions == null) return activeCrouchControlPath;
+
+            var control = actions.Gameplay.Crouch.activeControl;
+            return control != null ? control.path : activeCrouchControlPath;
+        }
+
+        private float GetCurrentCrouchValue()
+        {
+            if (actions == null || !actions.Gameplay.Crouch.enabled) return 0f;
+            return actions.Gameplay.Crouch.ReadValue<float>();
         }
 
         private void OnMovePerformed(InputAction.CallbackContext ctx)
@@ -311,20 +469,127 @@ namespace Game.Input
 
         private void OnCrouchStarted(InputAction.CallbackContext ctx)
         {
-            crouchPressed = true;
-            crouchHeld = true;
-            crouchHoldTimer = 0f;
-            layDownTriggeredThisHold = false;
+            string controlPath = ctx.control != null ? ctx.control.path : "<unknown>";
+            float controlValue = ctx.ReadValue<float>();
+            if (crouchHeld)
+            {
+                LogCrouchDiagnostic(
+                    "started.ignored",
+                    controlPath,
+                    controlValue,
+                    $"phase={ctx.phase} reason=gesture_already_active");
+                return;
+            }
+
+            LogCrouchDiagnostic(
+                "started",
+                controlPath,
+                controlValue,
+                $"phase={ctx.phase} result=await_performed");
 
             if (debugInput)
                 Debug.Log("[INPUT] CROUCH started");
         }
 
+        private void OnCrouchPerformed(InputAction.CallbackContext ctx)
+        {
+            string controlPath = ctx.control != null ? ctx.control.path : "<unknown>";
+            float controlValue = ctx.ReadValue<float>();
+            if (crouchHeld)
+            {
+                LogCrouchDiagnostic(
+                    "performed.ignored",
+                    controlPath,
+                    controlValue,
+                    $"phase={ctx.phase} reason=gesture_already_active");
+                return;
+            }
+
+            activeCrouchControlPath = controlPath;
+            crouchGestureOriginalPosture = posture;
+            crouchHeld = true;
+            crouchHoldTimer = 0f;
+            longCrouchTriggeredThisHold = false;
+            bool previewCrouchingFromLayDown =
+                crouchGestureOriginalPosture == PlayerPosture.LayDown;
+            bool deferShortUntilCanceled =
+                crouchGestureOriginalPosture != PlayerPosture.Standing;
+            string resolution = previewCrouchingFromLayDown
+                ? "preview_crouching"
+                : deferShortUntilCanceled ? "deferred_short" : "immediate_short";
+
+            LogCrouchDiagnostic(
+                "performed",
+                activeCrouchControlPath,
+                controlValue,
+                $"phase={ctx.phase} original={crouchGestureOriginalPosture} " +
+                $"resolution={resolution}");
+            if (previewCrouchingFromLayDown)
+                ApplyLayDownCrouchPreview();
+            else if (!deferShortUntilCanceled)
+                RegisterCrouchPress(CrouchPressType.Short);
+
+            if (debugInput)
+                Debug.Log("[INPUT] CROUCH performed");
+        }
+
         private void OnCrouchCanceled(InputAction.CallbackContext ctx)
         {
+            string controlPath = ctx.control != null ? ctx.control.path : activeCrouchControlPath;
+            float controlValue = ctx.ReadValue<float>();
+            LogCrouchDiagnostic(
+                "canceled",
+                controlPath,
+                controlValue,
+                $"phase={ctx.phase}");
+
+            if (!crouchHeld)
+            {
+                LogCrouchDiagnostic(
+                    "canceled.ignored",
+                    controlPath,
+                    controlValue,
+                    "reason=gesture_not_active");
+                activeCrouchControlPath = "<none>";
+                return;
+            }
+
+            bool registerDeferredShort =
+                !longCrouchTriggeredThisHold &&
+                crouchGestureOriginalPosture != PlayerPosture.Standing;
+
+            if (longCrouchTriggeredThisHold)
+            {
+                LogCrouchDiagnostic(
+                    "long.end",
+                    controlPath,
+                    controlValue,
+                    "result=keep_long_posture");
+            }
+            else
+            {
+                LogCrouchDiagnostic(
+                    "short.end",
+                    controlPath,
+                    controlValue,
+                    registerDeferredShort
+                        ? "result=register_deferred_short"
+                        : "result=keep_short_posture");
+            }
+
             crouchHeld = false;
             crouchHoldTimer = 0f;
-            layDownTriggeredThisHold = false;
+            longCrouchTriggeredThisHold = false;
+
+            if (registerDeferredShort)
+                RegisterCrouchPress(CrouchPressType.Short);
+
+            LogCrouchDiagnostic(
+                "canceled.complete",
+                controlPath,
+                controlValue,
+                $"registeredOrder={(registerDeferredShort ? CrouchPressType.Short : CrouchPressType.None)}");
+            activeCrouchControlPath = "<none>";
         }
     }
 }

@@ -451,7 +451,7 @@ namespace Game.Player
             rb.angularVelocity = 0f;
 
             if (input != null)
-                input.ForceStandUp();
+                input.ForceStandUp("PlayerController.ResetTransientState");
         }
 
         private void Awake()
@@ -578,13 +578,13 @@ namespace Game.Player
             CheckGround();
             CheckWall(inputY);
 
-            bool crouchPressed = input.ConsumeCrouchPressed();
-            if (crouchPressed)
+            InputReader.CrouchCommand crouchCommand = input.ConsumeCrouchPress();
+            if (crouchCommand.IsValid)
             {
                 if (isGrounded)
-                    input.ToggleCrouch();
+                    input.ApplyPostureTransition(crouchCommand);
                 else
-                    input.ForceStandUp();
+                    input.ForceStandUp("PlayerController.Update:CrouchPressWhileAirborne");
             }
 
             // Timers base
@@ -604,7 +604,7 @@ namespace Game.Player
             // ✅ Jump desde Crouch/LayDown: NO salta; intenta levantarse
             if (jumpPressed && (IsCrouching || IsLayDown))
             {
-                input.ForceStandUp();
+                input.ForceStandUp("PlayerController.Update:JumpWhileLowered");
                 jumpPressed = false;
                 jumpBufferTimer = 0f;
             }
@@ -982,7 +982,7 @@ namespace Game.Player
             if (isAttacking)
                 CancelAttack("swing");
 
-            input?.ForceStandUp();
+            input?.ForceStandUp("PlayerController.EnterSwing");
 
             rb.bodyType = RigidbodyType2D.Dynamic;
             rb.constraints = RigidbodyConstraints2D.FreezeRotation;
@@ -1015,7 +1015,7 @@ namespace Game.Player
 
         private void UpdateSwinging(float inputXClean, float inputYClean)
         {
-            input?.ForceStandUp();
+            input?.ForceStandUp("PlayerController.UpdateSwinging");
 
             input.ConsumeAttackPressed();
             input.ConsumeDashPressed();

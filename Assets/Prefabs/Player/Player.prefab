@@ -65,7 +65,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: bc694e8b999e82647906a2df4dad7ba8, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  holdSecondsForLayDown: 2
+  holdSecondsForLayDown: 0.4
   debugInput: 0
 --- !u!114 &2901667793802344536
 MonoBehaviour:
