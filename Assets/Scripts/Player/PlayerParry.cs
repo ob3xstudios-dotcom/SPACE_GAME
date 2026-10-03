@@ -67,7 +67,8 @@ namespace Game.Player
             if (!parryUnlocked) return;
             if (input == null) return;
 
-            if (controller != null && controller.IsSwinging)
+            if (controller != null &&
+                (controller.IsSwinging || controller.IsOverheadRailHanging))
             {
                 input.ConsumeParryPressed();
                 return;

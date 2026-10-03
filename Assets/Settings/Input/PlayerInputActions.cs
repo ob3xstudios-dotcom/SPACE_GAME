@@ -174,6 +174,33 @@ namespace Game.Input
                     ""processors"": """",
                     ""interactions"": ""Press"",
                     ""initialStateCheck"": false
+                },
+                {
+                    ""name"": ""Map"",
+                    ""type"": ""Button"",
+                    ""id"": ""5f305f1e-4546-4f85-b656-c092931a507e"",
+                    ""expectedControlType"": """",
+                    ""processors"": """",
+                    ""interactions"": ""Press"",
+                    ""initialStateCheck"": false
+                },
+                {
+                    ""name"": ""Skills"",
+                    ""type"": ""Button"",
+                    ""id"": ""d1e9d8aa-0e4a-43b0-bbb3-629b32b1ff01"",
+                    ""expectedControlType"": """",
+                    ""processors"": """",
+                    ""interactions"": ""Press"",
+                    ""initialStateCheck"": false
+                },
+                {
+                    ""name"": ""Cape"",
+                    ""type"": ""Button"",
+                    ""id"": ""784f64ce-94b4-4c36-b231-267b7ac71908"",
+                    ""expectedControlType"": """",
+                    ""processors"": """",
+                    ""interactions"": """",
+                    ""initialStateCheck"": false
                 }
             ],
             ""bindings"": [
@@ -484,6 +511,72 @@ namespace Game.Input
                     ""action"": ""Crouch"",
                     ""isComposite"": false,
                     ""isPartOfComposite"": false
+                },
+                {
+                    ""name"": """",
+                    ""id"": ""111e129d-f112-4f58-9ba1-b554a71f28a4"",
+                    ""path"": ""<Keyboard>/m"",
+                    ""interactions"": """",
+                    ""processors"": """",
+                    ""groups"": """",
+                    ""action"": ""Map"",
+                    ""isComposite"": false,
+                    ""isPartOfComposite"": false
+                },
+                {
+                    ""name"": """",
+                    ""id"": ""6d49844e-066d-43df-a873-c3a6c67b1a46"",
+                    ""path"": ""<Gamepad>/select"",
+                    ""interactions"": """",
+                    ""processors"": """",
+                    ""groups"": """",
+                    ""action"": ""Map"",
+                    ""isComposite"": false,
+                    ""isPartOfComposite"": false
+                },
+                {
+                    ""name"": """",
+                    ""id"": ""d1e9d8aa-0e4a-43b0-bbb3-629b32b1ff02"",
+                    ""path"": ""<Keyboard>/h"",
+                    ""interactions"": """",
+                    ""processors"": """",
+                    ""groups"": """",
+                    ""action"": ""Skills"",
+                    ""isComposite"": false,
+                    ""isPartOfComposite"": false
+                },
+                {
+                    ""name"": """",
+                    ""id"": ""d1e9d8aa-0e4a-43b0-bbb3-629b32b1ff03"",
+                    ""path"": ""<Gamepad>/start"",
+                    ""interactions"": """",
+                    ""processors"": """",
+                    ""groups"": """",
+                    ""action"": ""Skills"",
+                    ""isComposite"": false,
+                    ""isPartOfComposite"": false
+                },
+                {
+                    ""name"": """",
+                    ""id"": ""b95e9eef-4414-4b3f-bbb2-7894f26dc247"",
+                    ""path"": ""<Keyboard>/r"",
+                    ""interactions"": """",
+                    ""processors"": """",
+                    ""groups"": """",
+                    ""action"": ""Cape"",
+                    ""isComposite"": false,
+                    ""isPartOfComposite"": false
+                },
+                {
+                    ""name"": """",
+                    ""id"": ""1be027ba-1e63-4090-b9e9-a3aeb7211dd5"",
+                    ""path"": ""<Gamepad>/rightShoulder"",
+                    ""interactions"": """",
+                    ""processors"": """",
+                    ""groups"": """",
+                    ""action"": ""Cape"",
+                    ""isComposite"": false,
+                    ""isPartOfComposite"": false
                 }
             ]
         }
@@ -501,6 +594,9 @@ namespace Game.Input
             m_Gameplay_Parry = m_Gameplay.FindAction("Parry", throwIfNotFound: true);
             m_Gameplay_Crouch = m_Gameplay.FindAction("Crouch", throwIfNotFound: true);
             m_Gameplay_SwingGrab = m_Gameplay.FindAction("SwingGrab", throwIfNotFound: true);
+            m_Gameplay_Map = m_Gameplay.FindAction("Map", throwIfNotFound: true);
+            m_Gameplay_Skills = m_Gameplay.FindAction("Skills", throwIfNotFound: true);
+            m_Gameplay_Cape = m_Gameplay.FindAction("Cape", throwIfNotFound: true);
         }
 
         ~@PlayerInputActions()
@@ -590,6 +686,9 @@ namespace Game.Input
         private readonly InputAction m_Gameplay_Parry;
         private readonly InputAction m_Gameplay_Crouch;
         private readonly InputAction m_Gameplay_SwingGrab;
+        private readonly InputAction m_Gameplay_Map;
+        private readonly InputAction m_Gameplay_Skills;
+        private readonly InputAction m_Gameplay_Cape;
         /// <summary>
         /// Provides access to input actions defined in input action map "Gameplay".
         /// </summary>
@@ -637,6 +736,18 @@ namespace Game.Input
             /// Provides access to the underlying input action "Gameplay/SwingGrab".
             /// </summary>
             public InputAction @SwingGrab => m_Wrapper.m_Gameplay_SwingGrab;
+            /// <summary>
+            /// Provides access to the underlying input action "Gameplay/Map".
+            /// </summary>
+            public InputAction @Map => m_Wrapper.m_Gameplay_Map;
+            /// <summary>
+            /// Provides access to the underlying input action "Gameplay/Skills".
+            /// </summary>
+            public InputAction @Skills => m_Wrapper.m_Gameplay_Skills;
+            /// <summary>
+            /// Provides access to the underlying input action "Gameplay/Cape".
+            /// </summary>
+            public InputAction @Cape => m_Wrapper.m_Gameplay_Cape;
             /// <summary>
             /// Provides access to the underlying input action map instance.
             /// </summary>
@@ -690,6 +801,15 @@ namespace Game.Input
                 @SwingGrab.started += instance.OnSwingGrab;
                 @SwingGrab.performed += instance.OnSwingGrab;
                 @SwingGrab.canceled += instance.OnSwingGrab;
+                @Map.started += instance.OnMap;
+                @Map.performed += instance.OnMap;
+                @Map.canceled += instance.OnMap;
+                @Skills.started += instance.OnSkills;
+                @Skills.performed += instance.OnSkills;
+                @Skills.canceled += instance.OnSkills;
+                @Cape.started += instance.OnCape;
+                @Cape.performed += instance.OnCape;
+                @Cape.canceled += instance.OnCape;
             }
 
             /// <summary>
@@ -728,6 +848,15 @@ namespace Game.Input
                 @SwingGrab.started -= instance.OnSwingGrab;
                 @SwingGrab.performed -= instance.OnSwingGrab;
                 @SwingGrab.canceled -= instance.OnSwingGrab;
+                @Map.started -= instance.OnMap;
+                @Map.performed -= instance.OnMap;
+                @Map.canceled -= instance.OnMap;
+                @Skills.started -= instance.OnSkills;
+                @Skills.performed -= instance.OnSkills;
+                @Skills.canceled -= instance.OnSkills;
+                @Cape.started -= instance.OnCape;
+                @Cape.performed -= instance.OnCape;
+                @Cape.canceled -= instance.OnCape;
             }
 
             /// <summary>
@@ -831,6 +960,27 @@ namespace Game.Input
             /// <seealso cref="UnityEngine.InputSystem.InputAction.performed" />
             /// <seealso cref="UnityEngine.InputSystem.InputAction.canceled" />
             void OnSwingGrab(InputAction.CallbackContext context);
+            /// <summary>
+            /// Method invoked when associated input action "Map" is either <see cref="UnityEngine.InputSystem.InputAction.started" />, <see cref="UnityEngine.InputSystem.InputAction.performed" /> or <see cref="UnityEngine.InputSystem.InputAction.canceled" />.
+            /// </summary>
+            /// <seealso cref="UnityEngine.InputSystem.InputAction.started" />
+            /// <seealso cref="UnityEngine.InputSystem.InputAction.performed" />
+            /// <seealso cref="UnityEngine.InputSystem.InputAction.canceled" />
+            void OnMap(InputAction.CallbackContext context);
+            /// <summary>
+            /// Method invoked when associated input action "Skills" is either <see cref="UnityEngine.InputSystem.InputAction.started" />, <see cref="UnityEngine.InputSystem.InputAction.performed" /> or <see cref="UnityEngine.InputSystem.InputAction.canceled" />.
+            /// </summary>
+            /// <seealso cref="UnityEngine.InputSystem.InputAction.started" />
+            /// <seealso cref="UnityEngine.InputSystem.InputAction.performed" />
+            /// <seealso cref="UnityEngine.InputSystem.InputAction.canceled" />
+            void OnSkills(InputAction.CallbackContext context);
+            /// <summary>
+            /// Method invoked when associated input action "Cape" is either <see cref="UnityEngine.InputSystem.InputAction.started" />, <see cref="UnityEngine.InputSystem.InputAction.performed" /> or <see cref="UnityEngine.InputSystem.InputAction.canceled" />.
+            /// </summary>
+            /// <seealso cref="UnityEngine.InputSystem.InputAction.started" />
+            /// <seealso cref="UnityEngine.InputSystem.InputAction.performed" />
+            /// <seealso cref="UnityEngine.InputSystem.InputAction.canceled" />
+            void OnCape(InputAction.CallbackContext context);
         }
     }
 }

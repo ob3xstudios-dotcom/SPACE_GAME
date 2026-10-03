@@ -22,6 +22,9 @@ namespace Game.Player
         public IntResource Mana { get; private set; }
         public IntResource Stamina { get; private set; }
 
+        public int ConfiguredMaxHealth => maxHealth;
+        public int ConfiguredMaxStamina => maxStamina;
+
         public event Action<int, int> OnStaminaChanged;
 
         private void Awake()
@@ -50,6 +53,16 @@ namespace Game.Player
         {
             if (amount <= 0) return;
             Health.Restore(amount);
+        }
+
+        public void ApplyRuntimeMaxHealth(int newMax)
+        {
+            if (Health == null)
+                return;
+
+            int effectiveMax = Mathf.Max(1, newMax);
+            if (Health.Max != effectiveMax)
+                Health.SetMax(effectiveMax);
         }
 
         // --- MANA ---
@@ -120,6 +133,16 @@ namespace Game.Player
 
             if (refill)
                 Stamina.Fill();
+        }
+
+        public void ApplyRuntimeMaxStamina(int newMax)
+        {
+            if (Stamina == null)
+                return;
+
+            int effectiveMax = Mathf.Max(0, newMax);
+            if (Stamina.Max != effectiveMax)
+                Stamina.SetMax(effectiveMax);
         }
 
         private void HandleStaminaChanged(int current, int max)

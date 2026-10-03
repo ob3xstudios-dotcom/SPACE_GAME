@@ -51,6 +51,7 @@ Transform:
   - {fileID: 5714267417558101959}
   - {fileID: 7597697203337405988}
   - {fileID: 5807028257797065640}
+  - {fileID: 5534571408834901786}
   m_Father: {fileID: 0}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!114 &2936266359909524095
@@ -97,6 +98,14 @@ MonoBehaviour:
   layDownColliderProfile:
     size: {x: 1.6, y: 0.76}
     offset: {x: -0.009708, y: -0.5323992}
+    direction: 1
+  slideColliderProfile:
+    size: {x: 1.6, y: 0.76}
+    offset: {x: -0.009708, y: -0.5323992}
+    direction: 1
+  diveColliderProfile:
+    size: {x: 1.8, y: 0.7}
+    offset: {x: 0.08, y: -0.2}
     direction: 1
   postureClearanceSkin: 0.02
   groundCheck: {fileID: 4648022678629483259}
@@ -200,6 +209,16 @@ MonoBehaviour:
   sprintFullRechargeTime: 4
   sprintMomentumDuration: 0.7
   sprintLandingMomentumDuration: 0.7
+  slideDuration: 0.65
+  diveHoldTime: 0.22
+  slideInitialHorizontalSpeed: 10.5
+  slideDeceleration: 8
+  diveHorizontalImpulse: 3
+  diveVerticalImpulse: 5.2
+  postDiveSlideDeceleration: 18
+  postDiveSlideStopSpeed: 0.35
+  diveBlockedRecoveryDelay: 0.15
+  diveContactProbeDistance: 0.04
   parryMoveStopDecel: 90
   carryingMoveSpeedMultiplier: 0.65
   carryingJumpForceMultiplier: 0.5
@@ -214,6 +233,21 @@ MonoBehaviour:
   swingMinAngle: -75
   swingMaxAngle: 75
   swingMinBelowAnchor: 0.05
+  swingHandAnchor: {fileID: 5534571408834901786}
+  handPivotMotorForce: 38
+  handPivotTangentialAssistMultiplier: 0.2
+  handPivotCounterInputMultiplier: 1.15
+  handPivotRestSpeedThreshold: 0.35
+  handPivotAssistFadeStartRatio: 0.35
+  handPivotAssistStopRatio: 0.75
+  handPivotIdleTangentialDamping: 1.25
+  handPivotJumpForceX: 8
+  handPivotJumpForceY: 12
+  handPivotVelocityKeepMultiplier: 0.85
+  handPivotMinAngle: -75
+  handPivotMaxAngle: 75
+  handPivotUprightDegreesPerSecond: 540
+  handPivotUprightTolerance: 1
   stealthKill: {fileID: 0}
   jumpStartDelay: 0
   jumpAnticipationMoveSpeedMultiplier: 0.2
@@ -434,6 +468,8 @@ MonoBehaviour:
   parryTrigger: Parry
   crouchBool: Crouch
   layDownBool: LayDown
+  slidingBool: Sliding
+  divingBool: Diving
   movingThreshold: 0.05
   minRunAnimSpeed: 0.35
   maxRunAnimSpeed: 1.25
@@ -760,6 +796,37 @@ Transform:
   serializedVersion: 2
   m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
   m_LocalPosition: {x: 0.62, y: -0.03, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 2092831832841312426}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!1 &5574016164725408273
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 5534571408834901786}
+  m_Layer: 9
+  m_Name: SwingHandAnchor
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!4 &5534571408834901786
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 5574016164725408273}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0.23, y: 1.11, z: 0}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children: []

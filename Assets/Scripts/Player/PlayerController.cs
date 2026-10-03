@@ -6,9 +6,12 @@ using UnityEngine.Tilemaps;
 using Game.Barrels;
 using Game.Interaction;
 using Game.Input;
+using Game.Progression;
 using Game.Systems;
 using Game.UI;
 using Game.World;
+using Game.World.Factory.WoodProcessing;
+using Game.World.Traversal;
 
 namespace Game.Player
 {
@@ -32,6 +35,14 @@ namespace Game.Player
                 this.offset = offset;
                 this.direction = direction;
             }
+        }
+
+        public enum SprintSlideDiveState
+        {
+            None,
+            Slide,
+            Dive,
+            ProneSlide
         }
 
         [Header("Referencias")]
@@ -64,6 +75,16 @@ namespace Game.Player
             new PostureColliderProfile(
                 new Vector2(1.60f, 0.76f),
                 new Vector2(-0.009708f, -0.5323992f),
+                CapsuleDirection2D.Horizontal);
+        [SerializeField] private PostureColliderProfile slideColliderProfile =
+            new PostureColliderProfile(
+                new Vector2(1.60f, 0.76f),
+                new Vector2(-0.009708f, -0.5323992f),
+                CapsuleDirection2D.Horizontal);
+        [SerializeField] private PostureColliderProfile diveColliderProfile =
+            new PostureColliderProfile(
+                new Vector2(1.80f, 0.70f),
+                new Vector2(0.08f, -0.20f),
                 CapsuleDirection2D.Horizontal);
         [SerializeField, Min(0f)] private float postureClearanceSkin = 0.02f;
 
@@ -234,6 +255,22 @@ namespace Game.Player
         [SerializeField, Min(0f)] private float sprintMomentumDuration = 0.7f;
         [SerializeField, Min(0f)] private float sprintLandingMomentumDuration = 0.7f;
 
+        [Header("Sprint Slide / Forward Dive")]
+        [SerializeField, Min(0.05f)] private float slideDuration = 0.65f;
+        [SerializeField, Min(0.01f)] private float diveHoldTime = 0.22f;
+        [SerializeField, Min(0f)] private float slideInitialHorizontalSpeed = 10.5f;
+        [SerializeField, Min(0f)] private float slideDeceleration = 8f;
+        [SerializeField, Min(0f)] private float diveHorizontalImpulse = 3f;
+        [SerializeField, Min(0f)] private float diveVerticalImpulse = 5.2f;
+        [SerializeField, Min(0.01f)] private float postDiveSlideDeceleration = 12f;
+        [SerializeField, Min(0f)] private float postDiveSlideStopSpeed = 0.35f;
+        [Tooltip("Tolerancia breve para ignorar falsos negativos de suelo durante ProneSlide. No aplica fuerza de adherencia.")]
+        [SerializeField, Min(0f)] private float postDiveSlideGroundedGraceTime = 0.08f;
+        [Tooltip("Tiempo que se reintenta Dive -> Prone antes de recuperar una postura estrecha segura.")]
+        [SerializeField, Min(0f)] private float diveBlockedRecoveryDelay = 0.15f;
+        [Tooltip("Distancia corta usada por el collider de Dive para reconocer apoyo o contacto frontal real.")]
+        [SerializeField, Min(0.005f)] private float diveContactProbeDistance = 0.04f;
+
         // --------------------
         // PARRY / MOVE LOCK
         // --------------------
@@ -273,15 +310,51 @@ namespace Game.Player
         [SerializeField, Min(0f)] private float swingJumpForceX = 8f;
         [SerializeField, Min(0f)] private float swingJumpForceY = 12f;
         [SerializeField, Range(0f, 0.5f)] private float swingExitCooldown = 0.12f;
+        [SerializeField, Range(0f, 0.5f)] private float swingGrabCoyoteTime = 0.10f;
         [SerializeField, Range(0.1f, 1f)] private float swingDownThreshold = 0.5f;
         [SerializeField, Range(0f, 1f)] private float swingVelocityKeepMultiplier = 0.85f;
         [SerializeField, Range(-89f, 0f)] private float swingMinAngle = -75f;
         [SerializeField, Range(0f, 89f)] private float swingMaxAngle = 75f;
         [SerializeField, Min(0.01f)] private float swingMinBelowAnchor = 0.05f;
+
+        [Header("Swing - HandPivot")]
+        [SerializeField] private Transform swingHandAnchor;
+        [SerializeField, Min(0f)] private float handPivotMotorForce = 38f;
+        [SerializeField, Range(0f, 1f)] private float handPivotTangentialAssistMultiplier = 0.2f;
+        [SerializeField, Range(1f, 2f)] private float handPivotCounterInputMultiplier = 1.15f;
+        [SerializeField, Min(0f)] private float handPivotRestSpeedThreshold = 0.35f;
+        [SerializeField, Range(0f, 0.95f)] private float handPivotAssistFadeStartRatio = 0.35f;
+        [SerializeField, Range(0.05f, 1f)] private float handPivotAssistStopRatio = 0.75f;
+        [SerializeField, Min(0f)] private float handPivotIdleTangentialDamping = 1.25f;
+        [SerializeField, Min(0f)] private float handPivotJumpForceX = 8f;
+        [SerializeField, Min(0f)] private float handPivotJumpForceY = 12f;
+        [SerializeField, Range(0f, 1f)] private float handPivotVelocityKeepMultiplier = 0.85f;
+        [SerializeField, Range(-179f, 0f)] private float handPivotMinAngle = -75f;
+        [SerializeField, Range(0f, 179f)] private float handPivotMaxAngle = 75f;
+        [SerializeField, Min(1f)] private float handPivotUprightDegreesPerSecond = 540f;
+        [SerializeField, Range(0.1f, 10f)] private float handPivotUprightTolerance = 1f;
         private DistanceJoint2D swingJoint;
+        private HingeJoint2D handPivotJoint;
         private SwingPole currentSwingPole;
+        private SwingAttachmentMode activeSwingMode = SwingAttachmentMode.Rope;
+        private float activeRopeMinDistance = 0.05f;
+        private float activeRopeMaxDistance = 0.05f;
         private float swingCooldownTimer;
+        private int swingGrabTemporalVersion;
         private bool isSwinging;
+        private bool isHandPivotRecovering;
+        private RigidbodyType2D handPivotCachedBodyType;
+        private RigidbodyConstraints2D handPivotCachedConstraints;
+        private float handPivotUprightRotation;
+        private int handPivotExitFacing;
+
+        private SliderJoint2D overheadRailJoint;
+        private OverheadHangRail currentOverheadRail;
+        private bool isOverheadRailHanging;
+        private float overheadRailAlongSpeed;
+        private RigidbodyType2D overheadRailCachedBodyType;
+        private RigidbodyConstraints2D overheadRailCachedConstraints;
+        private float overheadRailCachedGravityScale;
 
         // --------------------
         // RUNTIME STATE
@@ -291,6 +364,11 @@ namespace Game.Player
         private Rigidbody2D rb;
         private CapsuleCollider2D capsule;
         private PlayerAnimatorDriver animDriver;
+        private PlayerHealth playerHealth;
+        private PlayerStatsRuntime progressionStats;
+        private ProgressionService progressionService;
+        private bool doubleJumpEquipped;
+        private bool doubleJumpAvailable;
 
         [SerializeField] private PlayerStealthKill stealthKill;
 
@@ -308,7 +386,17 @@ namespace Game.Player
         private bool isWallLosingContact;
         private RaycastHit2D wallSlideVisualHit;
         private Collider2D wallSlideVisualCollider;
+        private Collider2D currentGroundCollider;
         private HorizontalMovingPlatform currentGroundPlatform;
+        private ConveyorBelt currentGroundConveyor;
+        private WoodWorkpiece currentGroundWoodWorkpiece;
+        private float appliedConveyorVelocityX;
+        private bool suppressConveyorUntilAirborne;
+        private float slipperyTimer;
+        private float slipperyGroundAccelerationMultiplier = 1f;
+        private float slipperyGroundDecelerationMultiplier = 1f;
+        private float slipperyTurnResponsivenessMultiplier = 1f;
+        private PlayerSlipperyVisual slipperyVisual;
         private int wallSlideVisualSide;
         private bool wallSlideVisualHasEdge;
         private float wallSlideVisualEdgeY;
@@ -336,6 +424,34 @@ namespace Game.Player
         private float sprintLandingMomentumTimer;
         private float sprintMomentumSpeed;
         private int sprintMomentumDirection;
+        private SprintSlideDiveState sprintSlideDiveState;
+        private float slideElapsed;
+        private float slideCurrentSpeed;
+        private float diveElapsed;
+        private int sprintSlideDiveDirection;
+        private bool diveHasLeftGround;
+        private float diveProneRejectedSince = -1f;
+        private bool diveFrontContactWasActive;
+        private float lastDiveAirborneVelocityX;
+        private float preservedDiveAirborneVelocityX;
+        private bool hasDiveAirborneVelocitySample;
+        private float postDiveSlideCurrentSpeed;
+        private float postDiveSlideEntryVelocityX;
+        private float postDiveSlideGroundedGraceTimer;
+        private float postDiveSlideDebugLogTimer;
+        private float slideManeuverStartX;
+        private float slideManeuverSprintEntryVelocityX;
+        private float slideManeuverInitialSpeed;
+        private float forwardDiveStartX;
+        private float forwardDiveTakeoffX;
+        private bool hasForwardDiveTakeoffSample;
+        private float postDiveSlideLandingX;
+        private float combinedSlideToTakeoffDistance;
+        private float combinedDiveAirDistance;
+        private bool isUsingDiveColliderRecoveryProfile;
+        private string lastPostureClearanceFailureReason = "none";
+        private bool sprintCrouchDecisionPending;
+        private InputReader.CrouchCommand pendingSprintCrouchShort;
 
         private float wallJumpLockTimer;
         private float defaultGravityScale;
@@ -419,10 +535,16 @@ namespace Game.Player
         private float cachedGravityScale;
 
         private bool suppressWallWhileDownHeld;
+        private bool externalControlLocked;
 
         public bool FacingLeft => facingDir < 0;
         public bool IsGrounded => isGrounded;
+        public Collider2D CurrentGroundCollider => currentGroundCollider;
+        public bool IsGroundedOnMovingSupport =>
+            currentGroundPlatform != null || currentGroundWoodWorkpiece != null;
         public bool IsAttacking => isAttacking;
+        public bool IsDashing => isDashing;
+        public bool IsExternalControlLocked => externalControlLocked;
         public bool IsHanging => isHanging;
         public bool IsWallSliding => isWallSliding;
         public bool IsWallLosingContact => isWallSliding && isWallLosingContact;
@@ -430,10 +552,43 @@ namespace Game.Player
         public bool IsTouchingWall => isTouchingWall;
         public bool IsPushingIntoWall => IsInputPushingIntoWall(wallSide);
         public bool IsCarrying => carriedObject != null;
-        public bool IsSwinging => isSwinging;
+        public bool IsSwinging => isSwinging || isHandPivotRecovering;
+        public SwingAttachmentMode ActiveSwingMode => activeSwingMode;
+        public float SwingGrabCoyoteTime => Mathf.Max(0f, swingGrabCoyoteTime);
+        public int SwingGrabTemporalVersion => swingGrabTemporalVersion;
+        public SprintSlideDiveState SlideDiveState => sprintSlideDiveState;
+        public bool IsSliding => sprintSlideDiveState == SprintSlideDiveState.Slide;
+        public bool IsDiving => sprintSlideDiveState == SprintSlideDiveState.Dive;
+        public bool IsPostDiveSliding => sprintSlideDiveState == SprintSlideDiveState.ProneSlide;
+        public bool IsSlippery => slipperyTimer > 0f;
+        public bool IsOverheadRailHanging => isOverheadRailHanging;
         public bool IsNormalJumpAnticipating => hasPendingNormalJump;
+        public bool CanUseUpdraftCapeMotion =>
+            isActiveAndEnabled &&
+            rb != null &&
+            rb.bodyType == RigidbodyType2D.Dynamic &&
+            !externalControlLocked &&
+            !isGrounded &&
+            !isDashing &&
+            !isWallSliding &&
+            wallJumpLockTimer <= 0f &&
+            !hasPendingNormalJump &&
+            !isHanging &&
+            !isLedgeClimbing &&
+            !IsSwinging &&
+            !isOverheadRailHanging &&
+            !IsSliding &&
+            !IsDiving &&
+            !IsPostDiveSliding &&
+            !IsMoveLockedByParry &&
+            (swingJoint == null || !swingJoint.enabled) &&
+            (handPivotJoint == null || !handPivotJoint.enabled) &&
+            (overheadRailJoint == null || !overheadRailJoint.enabled);
         public BarrelCarryable CarriedObject => carriedObject;
         public Vector2 Velocity => rb != null ? rb.velocity : Vector2.zero;
+        public Vector2 SwingHandPosition => swingHandAnchor != null
+            ? swingHandAnchor.position
+            : transform.position;
 
         public event Action<int> WallJumped;
 
@@ -443,16 +598,87 @@ namespace Game.Player
 
         public void FaceDirection(int dir)
         {
+            if (IsSliding || IsDiving) return;
+            if (activeSwingMode == SwingAttachmentMode.HandPivot && IsSwinging) return;
             ApplyFacing(dir < 0 ? -1 : 1);
+        }
+
+        public void SetExternalControlLocked(bool locked)
+        {
+            if (locked && isOverheadRailHanging)
+                ExitOverheadRail(false);
+
+            if (locked)
+                CancelSprintCrouchDecision(
+                    "PlayerController.SetExternalControlLocked",
+                    true);
+
+            externalControlLocked = locked;
+        }
+
+        public void RefillSprintReserve()
+        {
+            sprintRemaining = Mathf.Max(0f, sprintMaxDuration);
+            sprintRegenDelayTimer = 0f;
+            sprintExhaustedUntilRelease = false;
+            sprintActive = false;
+        }
+
+        public void ApplySlipperyEffect(
+            float duration,
+            float accelerationMultiplier,
+            float decelerationMultiplier,
+            float turnMultiplier)
+        {
+            float safeDuration = Mathf.Max(0f, duration);
+            if (safeDuration <= 0f)
+                return;
+
+            slipperyTimer = safeDuration;
+            slipperyGroundAccelerationMultiplier = Mathf.Max(0f, accelerationMultiplier);
+            slipperyGroundDecelerationMultiplier = Mathf.Max(0f, decelerationMultiplier);
+            slipperyTurnResponsivenessMultiplier = Mathf.Max(0f, turnMultiplier);
+
+            if (slipperyVisual == null)
+                slipperyVisual = GetComponent<PlayerSlipperyVisual>();
+            if (slipperyVisual == null)
+                slipperyVisual = gameObject.AddComponent<PlayerSlipperyVisual>();
+
+            slipperyVisual.SetVisible(true);
+        }
+
+        private void UpdateSlipperyEffect(float deltaTime)
+        {
+            if (!IsSlippery)
+                return;
+
+            slipperyTimer = Mathf.Max(0f, slipperyTimer - Mathf.Max(0f, deltaTime));
+            if (slipperyTimer <= 0f)
+                ClearSlipperyEffect();
+        }
+
+        private void ClearSlipperyEffect()
+        {
+            slipperyTimer = 0f;
+            slipperyGroundAccelerationMultiplier = 1f;
+            slipperyGroundDecelerationMultiplier = 1f;
+            slipperyTurnResponsivenessMultiplier = 1f;
+            slipperyVisual?.SetVisible(false);
         }
 
         public void ResetTransientState()
         {
+            InvalidateSwingGrabTemporalState();
+            ClearSprintCrouchDecision();
+            ClearSlipperyEffect();
+            ForceEndOverheadRailForReset();
+
             attackCooldownTimer = 0f;
             coyoteTimer = 0f;
             jumpBufferTimer = 0f;
             dashTimer = 0f;
             dashCooldownTimer = 0f;
+            CancelSprintSlideDiveForReset();
             ResetSprintState(true);
             wallJumpLockTimer = 0f;
             wallStickTimer = 0f;
@@ -473,14 +699,19 @@ namespace Game.Player
             suppressWallWhileDownHeld = false;
             slopeMovementSuppressedUntilAirborne = false;
             groundNormal = Vector2.up;
+            currentGroundCollider = null;
             wasUsingSlopeMovementLastMove = false;
             slopeHorizontalSpeed = 0f;
+            currentGroundConveyor = null;
+            currentGroundWoodWorkpiece = null;
+            appliedConveyorVelocityX = 0f;
+            suppressConveyorUntilAirborne = false;
 
             if (carriedObject != null)
                 carriedObject.Drop();
 
-            if (isSwinging)
-                ExitSwing(false);
+            if (IsSwinging)
+                ForceEndSwingForReset();
 
             if (isHanging)
             {
@@ -512,6 +743,7 @@ namespace Game.Player
             rb = GetComponent<Rigidbody2D>();
             capsule = GetComponent<CapsuleCollider2D>();
             animDriver = GetComponent<PlayerAnimatorDriver>();
+            playerHealth = GetComponent<PlayerHealth>();
 
             if (input == null) input = GetComponent<InputReader>();
             if (stamina == null) stamina = GetComponent<PlayerStamina>();
@@ -543,6 +775,24 @@ namespace Game.Player
             swingJoint.autoConfigureConnectedAnchor = false;
             swingJoint.maxDistanceOnly = false;
 
+            handPivotJoint = GetComponent<HingeJoint2D>();
+            if (handPivotJoint == null)
+                handPivotJoint = gameObject.AddComponent<HingeJoint2D>();
+
+            handPivotJoint.enabled = false;
+            handPivotJoint.autoConfigureConnectedAnchor = false;
+            handPivotJoint.useMotor = false;
+
+            overheadRailJoint = GetComponent<SliderJoint2D>();
+            if (overheadRailJoint == null)
+                overheadRailJoint = gameObject.AddComponent<SliderJoint2D>();
+
+            overheadRailJoint.enabled = false;
+            overheadRailJoint.autoConfigureAngle = false;
+            overheadRailJoint.autoConfigureConnectedAnchor = false;
+            overheadRailJoint.useMotor = false;
+            overheadRailJoint.useLimits = true;
+
             if (ledgeTopLayer.value == 0)
                 ledgeTopLayer = groundLayer | wallLayer;
 
@@ -550,6 +800,55 @@ namespace Game.Player
 
             if (stealthKill == null)
                 stealthKill = GetComponent<PlayerStealthKill>();
+        }
+
+        private void OnEnable()
+        {
+            if (playerHealth == null)
+                playerHealth = GetComponent<PlayerHealth>();
+            if (playerHealth != null)
+                playerHealth.OnDamaged += HandlePlayerDamaged;
+
+            SubscribeToProgression();
+        }
+
+        private void OnDisable()
+        {
+            CancelSprintCrouchDecision("PlayerController.OnDisable", true);
+
+            if (playerHealth != null)
+                playerHealth.OnDamaged -= HandlePlayerDamaged;
+
+            UnsubscribeFromProgression();
+
+            if (isOverheadRailHanging)
+                ForceEndOverheadRailForReset();
+        }
+
+        private void SubscribeToProgression()
+        {
+            progressionService = ProgressionService.Instance;
+            progressionService.OnProgressionChanged -= RefreshEquippedAbilities;
+            progressionService.OnProgressionChanged += RefreshEquippedAbilities;
+            RefreshEquippedAbilities();
+        }
+
+        private void UnsubscribeFromProgression()
+        {
+            if (progressionService != null)
+                progressionService.OnProgressionChanged -= RefreshEquippedAbilities;
+        }
+
+        private void RefreshEquippedAbilities()
+        {
+            bool wasDoubleJumpEquipped = doubleJumpEquipped;
+            doubleJumpEquipped = progressionService != null &&
+                progressionService.IsAbilityEquipped(ProgressionAbilityIds.DoubleJump);
+
+            if (!doubleJumpEquipped)
+                doubleJumpAvailable = false;
+            else if (!wasDoubleJumpEquipped && isGrounded)
+                doubleJumpAvailable = true;
         }
 
         private bool TryApplyPostureCommand(
@@ -579,6 +878,7 @@ namespace Game.Player
         {
             if (input == null) return false;
 
+            ClearSprintCrouchDecision();
             input.CancelCrouchGesture(source);
             return TryApplyPosture(InputReader.PlayerPosture.Standing, source);
         }
@@ -587,6 +887,7 @@ namespace Game.Player
         {
             if (capsule == null || input == null) return;
 
+            ClearSprintCrouchDecision();
             input.CancelCrouchGesture(source);
             ApplyPostureColliderProfile(InputReader.PlayerPosture.Standing);
             input.CommitPosture(InputReader.PlayerPosture.Standing, source);
@@ -594,30 +895,38 @@ namespace Game.Player
 
         private bool CanAdoptPosture(
             InputReader.PlayerPosture targetPosture,
-            string source)
+            string source,
+            bool logBlocked = true)
         {
             PostureColliderProfile targetProfile = GetPostureColliderProfile(targetPosture);
             if (!IsPostureColliderProfileValid(targetProfile))
             {
-                if (debugLogs)
+                if (debugLogs && logBlocked)
                     Debug.LogWarning($"[POSTURE] BLOCKED source={source} target={targetPosture} reason=invalid-profile");
                 return false;
             }
 
             InputReader.PlayerPosture currentPosture = input.CurrentPosture;
-            if (currentPosture == targetPosture) return true;
+            if (currentPosture == targetPosture && !isUsingDiveColliderRecoveryProfile)
+                return true;
 
-            PostureColliderProfile currentProfile = GetPostureColliderProfile(currentPosture);
+            PostureColliderProfile currentProfile = isUsingDiveColliderRecoveryProfile
+                ? diveColliderProfile
+                : GetPostureColliderProfile(currentPosture);
             if (!RequiresPostureClearance(currentProfile, targetProfile)) return true;
 
-            return HasPostureClearance(targetPosture, targetProfile, source);
+            return HasPostureClearance(targetPosture, targetProfile, source, logBlocked);
         }
 
         private bool HasPostureClearance(
             InputReader.PlayerPosture targetPosture,
             PostureColliderProfile targetProfile,
-            string source)
+            string source,
+            bool logBlocked,
+            Vector2 bodyPositionOffset = default)
         {
+            lastPostureClearanceFailureReason = "none";
+
             Vector3 lossyScale = transform.lossyScale;
             Vector2 querySize = new Vector2(
                 targetProfile.size.x * Mathf.Abs(lossyScale.x),
@@ -634,7 +943,8 @@ namespace Game.Player
                 querySize.y - floorContactTolerance + clearance
             );
 
-            Vector2 queryCenter = transform.TransformPoint(targetProfile.offset);
+            Vector2 queryCenter =
+                (Vector2)transform.TransformPoint(targetProfile.offset) + bodyPositionOffset;
             queryCenter += Vector2.up * ((floorContactTolerance + clearance) * 0.5f);
 
             ContactFilter2D filter = new ContactFilter2D();
@@ -653,10 +963,11 @@ namespace Game.Player
 
             if (hitCount >= postureClearanceHits.Length)
             {
-                if (debugLogs)
+                lastPostureClearanceFailureReason = $"clearance-buffer-full count={hitCount}";
+                if (debugLogs && logBlocked)
                     Debug.LogWarning(
                         $"[POSTURE] BLOCKED source={source} target={targetPosture} " +
-                        $"reason=clearance-buffer-full count={hitCount}");
+                        $"reason={lastPostureClearanceFailureReason}");
                 return false;
             }
 
@@ -667,10 +978,12 @@ namespace Game.Player
                 if (hit.attachedRigidbody == rb) continue;
                 if (hit.transform == transform || hit.transform.IsChildOf(transform)) continue;
 
-                if (debugLogs)
+                lastPostureClearanceFailureReason =
+                    $"solid-overlap collider={DescribeCollider2D(hit)}";
+                if (debugLogs && logBlocked)
                     Debug.LogWarning(
                         $"[POSTURE] BLOCKED source={source} target={targetPosture} " +
-                        $"reason=solid-overlap collider={DescribeCollider2D(hit)}");
+                        $"reason={lastPostureClearanceFailureReason}");
                 return false;
             }
 
@@ -680,9 +993,112 @@ namespace Game.Player
         private void ApplyPostureColliderProfile(InputReader.PlayerPosture posture)
         {
             PostureColliderProfile profile = GetPostureColliderProfile(posture);
+            ApplyColliderProfile(profile);
+            isUsingDiveColliderRecoveryProfile = false;
+        }
+
+        private void ApplyColliderProfile(PostureColliderProfile profile)
+        {
             capsule.direction = profile.direction;
             capsule.size = profile.size;
             capsule.offset = profile.offset;
+        }
+
+        private bool CanChangeColliderProfile(
+            PostureColliderProfile currentProfile,
+            PostureColliderProfile targetProfile,
+            InputReader.PlayerPosture clearancePosture,
+            string source,
+            bool logBlocked = true)
+        {
+            if (!IsPostureColliderProfileValid(targetProfile))
+            {
+                lastPostureClearanceFailureReason = "invalid-special-profile";
+                if (debugLogs && logBlocked)
+                    Debug.LogWarning($"[POSTURE] BLOCKED source={source} reason=invalid-special-profile");
+                return false;
+            }
+
+            if (!RequiresPostureClearance(currentProfile, targetProfile))
+            {
+                lastPostureClearanceFailureReason = "none";
+                return true;
+            }
+
+            return HasPostureClearance(
+                clearancePosture,
+                targetProfile,
+                source,
+                logBlocked);
+        }
+
+        private bool TryApplyPostureFromProfile(
+            PostureColliderProfile currentProfile,
+            InputReader.PlayerPosture targetPosture,
+            string source,
+            bool logBlocked = true)
+        {
+            PostureColliderProfile targetProfile = GetPostureColliderProfile(targetPosture);
+            if (!CanChangeColliderProfile(
+                    currentProfile,
+                    targetProfile,
+                    targetPosture,
+                    source,
+                    logBlocked))
+                return false;
+
+            ApplyColliderProfile(targetProfile);
+            input.CommitPosture(targetPosture, source);
+            return true;
+        }
+
+        private bool TryApplyPostureFromProfilePreservingBottom(
+            PostureColliderProfile currentProfile,
+            InputReader.PlayerPosture targetPosture,
+            string source,
+            bool logBlocked = true)
+        {
+            PostureColliderProfile targetProfile = GetPostureColliderProfile(targetPosture);
+            if (!IsPostureColliderProfileValid(currentProfile) ||
+                !IsPostureColliderProfileValid(targetProfile))
+            {
+                lastPostureClearanceFailureReason = "invalid-bottom-preserving-profile";
+                return false;
+            }
+
+            float currentBottomY = transform.TransformPoint(
+                new Vector2(
+                    currentProfile.offset.x,
+                    currentProfile.offset.y - currentProfile.size.y * 0.5f)
+            ).y;
+            float targetBottomY = transform.TransformPoint(
+                new Vector2(
+                    targetProfile.offset.x,
+                    targetProfile.offset.y - targetProfile.size.y * 0.5f)
+            ).y;
+            float lift = currentBottomY - targetBottomY;
+            if (lift <= 0.0001f)
+            {
+                lastPostureClearanceFailureReason = "bottom-preserving-lift-unavailable";
+                return false;
+            }
+
+            Vector2 bodyPositionOffset = Vector2.up * lift;
+            if (RequiresPostureClearance(currentProfile, targetProfile) &&
+                !HasPostureClearance(
+                    targetPosture,
+                    targetProfile,
+                    source,
+                    logBlocked,
+                    bodyPositionOffset))
+                return false;
+
+            Vector2 targetBodyPosition = rb.position + bodyPositionOffset;
+            rb.position = targetBodyPosition;
+            transform.position = targetBodyPosition;
+            ApplyColliderProfile(targetProfile);
+            input.CommitPosture(targetPosture, source);
+            return true;
         }
 
         private PostureColliderProfile GetPostureColliderProfile(
@@ -730,6 +1146,8 @@ namespace Game.Player
 
         private void Update()
         {
+            UpdateSlipperyEffect(Time.deltaTime);
+
             if (stats == null || input == null) return;
 
             // cooldowns
@@ -743,7 +1161,11 @@ namespace Game.Player
                 interactLockTimer -= Time.deltaTime;
 
             if (swingCooldownTimer > 0f)
+            {
                 swingCooldownTimer -= Time.deltaTime;
+                if (swingCooldownTimer > 0f)
+                    input.ClearSwingGrabBuffer();
+            }
 
             if (ledgeDebugLogTimer > 0f)
                 ledgeDebugLogTimer -= Time.deltaTime;
@@ -762,6 +1184,21 @@ namespace Game.Player
 
             if (cornerStuckDebugLogTimer > 0f)
                 cornerStuckDebugLogTimer -= Time.deltaTime;
+
+            if (externalControlLocked)
+            {
+                // Keep action cooldowns progressing while an external interaction owns
+                // movement and physics, but do not process gameplay state or input.
+                dashCooldownTimer -= Time.deltaTime;
+                attackCooldownTimer -= Time.deltaTime;
+                return;
+            }
+
+            if (isOverheadRailHanging)
+            {
+                UpdateOverheadRailHanging();
+                return;
+            }
 
             // Input limpio (para wall/ledge/hang)
             float rawInputX = Mathf.Clamp(input.MoveInput.x, -1f, 1f);
@@ -789,8 +1226,15 @@ namespace Game.Player
                 suppressWallWhileDownHeld = false;
 
             // Si está colgado, solo lógica de hang
+            if (isHandPivotRecovering)
+            {
+                UpdateHandPivotRecovery();
+                return;
+            }
+
             if (isHanging)
             {
+                input.ClearSwingGrabBuffer();
                 UpdateHanging(inputX, inputY);
                 return;
             }
@@ -798,6 +1242,22 @@ namespace Game.Player
             if (isSwinging)
             {
                 UpdateSwinging(inputX, inputY);
+                return;
+            }
+
+            if (IsSliding || IsDiving || IsPostDiveSliding)
+            {
+                CheckGround();
+                if (IsPostDiveSliding)
+                {
+                    InputReader.CrouchCommand ignoredCrouchCommand = input.ConsumeCrouchPress();
+                    if (ignoredCrouchCommand.IsValid)
+                        input.ClaimCrouchGesture("PlayerController.Update:PostDiveSlide");
+                    DiscardInputsDuringSprintSlideDive();
+                    return;
+                }
+
+                UpdateSprintSlideDive();
                 return;
             }
 
@@ -810,14 +1270,8 @@ namespace Game.Player
             CheckWall(inputY);
 
             InputReader.CrouchCommand crouchCommand = input.ConsumeCrouchPress();
-            if (crouchCommand.IsValid)
-            {
-                if (isGrounded)
-                    TryApplyPostureCommand(crouchCommand, "PlayerController.Update:CrouchCommand");
-                else
-                    TryStandingPostureAndCancelGesture(
-                        "PlayerController.Update:CrouchPressWhileAirborne");
-            }
+            if (HandleCrouchCommand(crouchCommand))
+                return;
 
             // Timers base
             coyoteTimer = isGrounded ? stats.coyoteTime : (coyoteTimer - Time.deltaTime);
@@ -880,7 +1334,14 @@ namespace Game.Player
             }
 
             if (interactPressed)
+            {
                 TryInteract();
+
+                // An interaction such as hiding or sitting can disable this controller.
+                // Do not process movement actions later in the same Update in that case.
+                if (!isActiveAndEnabled || externalControlLocked)
+                    return;
+            }
 
             // Jump normal (buffer + coyote)
             if (!hasPendingNormalJump && jumpBufferTimer > 0f && coyoteTimer > 0f)
@@ -897,6 +1358,11 @@ namespace Game.Player
                 jumpBufferTimer = 0f;
             }
 
+            // Aerial ability jump. Ground/coyote and wall jump always get first claim
+            // on the same buffered press, so one physical press cannot trigger both.
+            if (jumpBufferTimer > 0f && TryUseDoubleJump())
+                jumpBufferTimer = 0f;
+
             // Jump cut
             if (!input.JumpHeld && rb.velocity.y > 0.01f)
                 rb.velocity = new Vector2(rb.velocity.x, rb.velocity.y * stats.jumpCutMultiplier);
@@ -912,6 +1378,16 @@ namespace Game.Player
         private void FixedUpdate()
         {
             if (stats == null || input == null) return;
+            if (externalControlLocked) return;
+
+            if (isOverheadRailHanging)
+            {
+                UpdateSprintTimers(Time.fixedDeltaTime);
+                sprintActive = false;
+                sprintWasGrounded = isGrounded;
+                FixedUpdateOverheadRailHanging();
+                return;
+            }
 
             if (isHanging)
             {
@@ -921,12 +1397,31 @@ namespace Game.Player
                 return;
             }
 
+            if (isHandPivotRecovering)
+            {
+                UpdateSprintTimers(Time.fixedDeltaTime);
+                sprintActive = false;
+                sprintWasGrounded = isGrounded;
+                FixedUpdateHandPivotRecovery();
+                return;
+            }
+
             if (isSwinging)
             {
                 UpdateSprintTimers(Time.fixedDeltaTime);
                 sprintActive = false;
                 sprintWasGrounded = isGrounded;
                 FixedUpdateSwinging();
+                return;
+            }
+
+            if (IsSliding || IsDiving || IsPostDiveSliding)
+            {
+                CheckGround();
+                UpdateSprintTimers(Time.fixedDeltaTime);
+                sprintActive = false;
+                sprintWasGrounded = isGrounded;
+                FixedUpdateSprintSlideDive();
                 return;
             }
 
@@ -941,6 +1436,7 @@ namespace Game.Player
 
             suppressWallSlideThisFixed = false;
             CheckGround();
+            TryResolveDiveColliderRecoveryProfile();
             UpdateSprintTimers(Time.fixedDeltaTime);
             UpdateSprintState();
             UpdateRecentlyGroundedTimer(Time.fixedDeltaTime);
@@ -952,8 +1448,12 @@ namespace Game.Player
             // ✅ Parry move lock: no Move()
             if (IsMoveLockedByParry)
             {
-                float newVX = Mathf.MoveTowards(rb.velocity.x, 0f, parryMoveStopDecel * Time.fixedDeltaTime);
-                rb.velocity = new Vector2(newVX, rb.velocity.y);
+                float controlledVelocityX = HorizontalVelocityWithoutConveyor();
+                float newVX = Mathf.MoveTowards(
+                    controlledVelocityX,
+                    0f,
+                    parryMoveStopDecel * Time.fixedDeltaTime);
+                SetHorizontalVelocityWithConveyor(newVX);
                 ApplyBetterJumpGravity();
                 return;
             }
@@ -970,7 +1470,7 @@ namespace Game.Player
         // --------------------
         private void StartAttack()
         {
-            if (isSwinging) return;
+            if (IsSwinging || isOverheadRailHanging || IsSliding || IsDiving) return;
 
             DropCarriedObject();
 
@@ -1111,7 +1611,7 @@ namespace Game.Player
 
         private void TryInteract()
         {
-            if (isSwinging) return;
+            if (IsSwinging || isOverheadRailHanging || IsSliding || IsDiving) return;
             if (interactLockTimer > 0f) return;
 
             if (carriedObject != null)
@@ -1146,7 +1646,7 @@ namespace Game.Player
         public bool TrySetCarriedObject(BarrelCarryable carryable)
         {
             if (carryable == null) return false;
-            if (isSwinging) return false;
+            if (IsSwinging || isOverheadRailHanging || IsSliding || IsDiving) return false;
             if (carriedObject != null && carriedObject != carryable) return false;
 
             carriedObject = carryable;
@@ -1165,25 +1665,325 @@ namespace Game.Player
             wasLayDown = IsLayDown;
         }
 
-        public bool TryEnterSwing(SwingPole pole)
+        public bool TryEnterOverheadRail(OverheadHangRail rail)
         {
-            if (!CanEnterSwing(pole)) return false;
+            if (!CanEnterOverheadRail(rail)) return false;
             if (input != null &&
-                !TryStandingPostureAndCancelGesture("PlayerController.TryEnterSwing"))
+                !TryStandingPostureAndCancelGesture("PlayerController.TryEnterOverheadRail"))
                 return false;
 
             DropCarriedObject();
             ClearSprintMomentum();
-            EnterSwing(pole);
+            return EnterOverheadRail(rail);
+        }
+
+        public bool CanEnterOverheadRail(OverheadHangRail rail)
+        {
+            if (rail == null || !rail.isActiveAndEnabled) return false;
+            if (!isActiveAndEnabled || externalControlLocked) return false;
+            if (rb == null || !rb.simulated || capsule == null || !capsule.enabled) return false;
+            if (swingHandAnchor == null || overheadRailJoint == null) return false;
+            if (isOverheadRailHanging || IsSwinging || isHanging || isDashing) return false;
+            if (IsSliding || IsDiving || IsPostDiveSliding) return false;
+            if (isAttacking || IsMoveLockedByParry) return false;
+            return rail.CanGrabHandAt(SwingHandPosition);
+        }
+
+        public bool CanEnterOverheadRailForFeedback(OverheadHangRail rail)
+        {
+            if (!CanEnterOverheadRail(rail)) return false;
+            return CanPrepareStandingPostureForSwing();
+        }
+
+        private bool EnterOverheadRail(OverheadHangRail rail)
+        {
+            if (rail == null || !rail.HasValidSegment || swingHandAnchor == null ||
+                overheadRailJoint == null)
+                return false;
+
+            Vector2 tangent = rail.GetTangent();
+            Vector2 entryVelocity = rb.velocity;
+            Vector2 handPosition = swingHandAnchor.position;
+            float normalizedPosition = rail.ProjectPointToRail(handPosition);
+            Vector2 grabPosition = rail.GetPositionAtNormalized(normalizedPosition);
+            Vector2 localHandAnchor = transform.InverseTransformPoint(handPosition);
+
+            InvalidateSwingGrabTemporalState();
+            overheadRailCachedBodyType = rb.bodyType;
+            overheadRailCachedConstraints = rb.constraints;
+            overheadRailCachedGravityScale = rb.gravityScale;
+
+            currentOverheadRail = rail;
+            isOverheadRailHanging = true;
+            overheadRailAlongSpeed = Vector2.Dot(entryVelocity, tangent);
+            isDashing = false;
+            isWallSliding = false;
+            wallStickTimer = 0f;
+            wallCoyoteTimer = 0f;
+            jumpBufferTimer = 0f;
+            coyoteTimer = 0f;
+            hasPendingNormalJump = false;
+            pendingNormalJumpTimer = 0f;
+            normalJumpAnticipationAge = 0f;
+            parryMoveLockTimer = 0f;
+            ClearGroundSupportForOverheadTraversal();
+
+            rb.bodyType = RigidbodyType2D.Dynamic;
+            rb.constraints =
+                (overheadRailCachedConstraints &
+                 ~(RigidbodyConstraints2D.FreezePositionX | RigidbodyConstraints2D.FreezePositionY)) |
+                RigidbodyConstraints2D.FreezeRotation;
+            rb.gravityScale = 0f;
+            rb.angularVelocity = 0f;
+            rb.position += grabPosition - handPosition;
+            rb.velocity = tangent * overheadRailAlongSpeed;
+
+            overheadRailJoint.enabled = false;
+            overheadRailJoint.connectedBody = null;
+            overheadRailJoint.anchor = localHandAnchor;
+            overheadRailJoint.connectedAnchor = rail.PointA;
+            overheadRailJoint.autoConfigureAngle = false;
+            // With no connected body, Unity measures this joint's translation from the
+            // attached hand anchor toward connectedAnchor. Pointing the joint axis B -> A
+            // therefore maps PointA to 0 and PointB to +railLength while preserving the
+            // same physical line as the gameplay tangent A -> B.
+            overheadRailJoint.angle = Vector2.SignedAngle(Vector2.right, -tangent);
+            overheadRailJoint.useMotor = false;
+
+            float railLength = rail.Length;
+            JointTranslationLimits2D limits = overheadRailJoint.limits;
+            limits.min = 0f;
+            limits.max = railLength;
+            overheadRailJoint.limits = limits;
+            overheadRailJoint.useLimits = true;
+            overheadRailJoint.enabled = true;
+
+            if (debugLogs)
+            {
+                Debug.Log(
+                    $"[OVERHEAD RAIL] ENTER rail={rail.name} position={normalizedPosition:0.000} " +
+                    $"entrySpeed={overheadRailAlongSpeed:0.00}");
+            }
+
             return true;
+        }
+
+        private void UpdateOverheadRailHanging()
+        {
+            input.CancelCrouchGesture("PlayerController.UpdateOverheadRailHanging");
+            input.ClearSwingGrabBuffer();
+            input.ConsumeAttackPressed();
+            input.ConsumeDashPressed();
+            input.ConsumeParryPressed();
+
+            if (input.ConsumeJumpPressed())
+            {
+                ExitOverheadRail(true);
+                return;
+            }
+
+            if (input.ConsumeInteractPressed())
+                ExitOverheadRail(false);
+        }
+
+        private void FixedUpdateOverheadRailHanging()
+        {
+            if (currentOverheadRail == null || !currentOverheadRail.isActiveAndEnabled ||
+                overheadRailJoint == null || !overheadRailJoint.enabled ||
+                swingHandAnchor == null || !currentOverheadRail.HasValidSegment)
+            {
+                ExitOverheadRail(false);
+                return;
+            }
+
+            Vector2 tangent = currentOverheadRail.GetTangent();
+            float traversalInput = Mathf.Clamp(
+                currentOverheadRail.GetPlayerTraversalInput(input.MoveInput),
+                -1f,
+                1f);
+            if (Mathf.Abs(traversalInput) < wallInputDeadzone)
+                traversalInput = 0f;
+
+            float targetSpeed = currentOverheadRail.TransportSpeed +
+                traversalInput * currentOverheadRail.PlayerMoveSpeed;
+            float rate = Mathf.Abs(traversalInput) > 0.01f
+                ? currentOverheadRail.PlayerAcceleration
+                : currentOverheadRail.PlayerDeceleration;
+            float actualAlongSpeed = Vector2.Dot(rb.velocity, tangent);
+            float nextAlongSpeed = Mathf.MoveTowards(
+                actualAlongSpeed,
+                targetSpeed,
+                rate * Time.fixedDeltaTime);
+
+            float normalizedPosition = currentOverheadRail.ProjectPointToRail(
+                swingHandAnchor.position);
+            float normalizedEndTolerance = Mathf.Min(
+                0.05f,
+                0.025f / Mathf.Max(0.05f, currentOverheadRail.Length));
+            bool pushingPastA =
+                normalizedPosition <= normalizedEndTolerance && nextAlongSpeed < 0f;
+            bool pushingPastB =
+                normalizedPosition >= 1f - normalizedEndTolerance && nextAlongSpeed > 0f;
+
+            if (pushingPastA || pushingPastB)
+            {
+                if (currentOverheadRail.EndBehavior == OverheadRailEndBehavior.Drop)
+                {
+                    rb.velocity = tangent * nextAlongSpeed;
+                    overheadRailAlongSpeed = nextAlongSpeed;
+                    ExitOverheadRail(false);
+                    return;
+                }
+
+                nextAlongSpeed = 0f;
+            }
+
+            overheadRailAlongSpeed = nextAlongSpeed;
+            rb.velocity = tangent * overheadRailAlongSpeed;
+            rb.angularVelocity = 0f;
+        }
+
+        private void ExitOverheadRail(bool jumpOff)
+        {
+            if (!isOverheadRailHanging) return;
+
+            OverheadHangRail rail = currentOverheadRail;
+            Vector2 tangent = rail != null && rail.HasValidSegment
+                ? rail.GetTangent()
+                : Vector2.right;
+            float exitAlongSpeed = rb != null
+                ? Vector2.Dot(rb.velocity, tangent)
+                : overheadRailAlongSpeed;
+            float jumpSpeed = jumpOff && rail != null
+                ? rail.JumpOffVerticalSpeed
+                : 0f;
+
+            DisableOverheadRailJoint();
+            isOverheadRailHanging = false;
+            currentOverheadRail = null;
+            overheadRailAlongSpeed = 0f;
+
+            rb.bodyType = overheadRailCachedBodyType;
+            rb.constraints = overheadRailCachedConstraints;
+            rb.gravityScale = overheadRailCachedGravityScale;
+            rb.angularVelocity = 0f;
+            rb.velocity = tangent * exitAlongSpeed + Vector2.up * jumpSpeed;
+            ClearGroundSupportForOverheadTraversal();
+            slopeMovementSuppressedUntilAirborne = jumpOff;
+
+            if (debugLogs)
+            {
+                Debug.Log(
+                    $"[OVERHEAD RAIL] EXIT jump={jumpOff} " +
+                    $"alongSpeed={exitAlongSpeed:0.00} velocity={rb.velocity}");
+            }
+        }
+
+        private void ForceEndOverheadRailForReset()
+        {
+            DisableOverheadRailJoint();
+            if (isOverheadRailHanging && rb != null)
+            {
+                rb.bodyType = overheadRailCachedBodyType;
+                rb.constraints = overheadRailCachedConstraints;
+                rb.gravityScale = overheadRailCachedGravityScale;
+                rb.angularVelocity = 0f;
+            }
+
+            isOverheadRailHanging = false;
+            currentOverheadRail = null;
+            overheadRailAlongSpeed = 0f;
+            ClearGroundSupportForOverheadTraversal();
+        }
+
+        private void DisableOverheadRailJoint()
+        {
+            if (overheadRailJoint == null) return;
+
+            overheadRailJoint.enabled = false;
+            overheadRailJoint.connectedBody = null;
+            overheadRailJoint.useMotor = false;
+        }
+
+        private void ClearGroundSupportForOverheadTraversal()
+        {
+            isGrounded = false;
+            groundNormal = Vector2.up;
+            currentGroundPlatform = null;
+            currentGroundConveyor = null;
+            currentGroundWoodWorkpiece = null;
+            appliedConveyorVelocityX = 0f;
+            suppressConveyorUntilAirborne = false;
+            slopeMovementSuppressedUntilAirborne = false;
+            ResetSlopeMovementCarry();
+        }
+
+        private void HandlePlayerDamaged(int damage)
+        {
+            if (isOverheadRailHanging)
+                ExitOverheadRail(false);
+        }
+
+        public bool TryEnterSwing(SwingPole pole)
+        {
+            if (!CanEnterSwing(pole)) return false;
+            return CompleteSwingEntry(pole, "PlayerController.TryEnterSwing");
+        }
+
+        public bool TryEnterSwingFromCoyote(SwingPole pole)
+        {
+            if (!CanEnterSwingFromCoyote(pole)) return false;
+            return CompleteSwingEntry(pole, "PlayerController.TryEnterSwingFromCoyote");
+        }
+
+        private bool CompleteSwingEntry(SwingPole pole, string source)
+        {
+            if (input != null &&
+                !TryStandingPostureAndCancelGesture(source))
+                return false;
+
+            DropCarriedObject();
+            ClearSprintMomentum();
+            return EnterSwing(pole);
         }
 
         public bool CanEnterSwing(SwingPole pole)
         {
             if (pole == null) return false;
-            if (isSwinging || isHanging) return false;
+            if (IsSwinging || isOverheadRailHanging || isHanging || IsSliding || IsDiving) return false;
             if (swingCooldownTimer > 0f) return false;
             return pole.CanCatch(this, rb);
+        }
+
+        public bool CanEnterSwingFromCoyote(SwingPole pole)
+        {
+            if (pole == null) return false;
+            if (IsSwinging || isOverheadRailHanging || isHanging || IsSliding || IsDiving) return false;
+            if (swingCooldownTimer > 0f) return false;
+            return pole.CanCatchDuringCoyote(this, rb);
+        }
+
+        public bool CanEnterSwingForFeedback(SwingPole pole)
+        {
+            if (!CanEnterSwing(pole)) return false;
+            return CanPrepareStandingPostureForSwing();
+        }
+
+        public bool CanEnterSwingFromCoyoteForFeedback(SwingPole pole)
+        {
+            if (!CanEnterSwingFromCoyote(pole)) return false;
+            return CanPrepareStandingPostureForSwing();
+        }
+
+        private bool CanPrepareStandingPostureForSwing()
+        {
+            if (input == null) return true;
+            if (capsule == null) return false;
+
+            return CanAdoptPosture(
+                InputReader.PlayerPosture.Standing,
+                "PlayerController.CanEnterSwingForFeedback",
+                false);
         }
 
         public bool TryEnterLedgeGrabPoint(LedgeGrabPoint point)
@@ -1208,7 +2008,7 @@ namespace Game.Player
         {
             if (point == null || !point.isActiveAndEnabled) return false;
             if (!enableLedgeGrab) return false;
-            if (isSwinging || isHanging || isDashing || IsCarrying) return false;
+            if (IsSwinging || isOverheadRailHanging || isHanging || isDashing || IsSliding || IsDiving || IsCarrying) return false;
             if (ledgeGrabCooldownTimer > 0f) return false;
             if (IsCrouching || IsLayDown) return false;
             if (suppressWallWhileDownHeld) return false;
@@ -1216,12 +2016,27 @@ namespace Game.Player
             return true;
         }
 
-        private void EnterSwing(SwingPole pole)
+        private bool EnterSwing(SwingPole pole)
         {
+            SwingAttachmentMode requestedMode = pole.AttachmentMode;
+            if (requestedMode == SwingAttachmentMode.HandPivot &&
+                (swingHandAnchor == null || handPivotJoint == null))
+            {
+                Debug.LogError(
+                    $"[SWING] Cannot enter HandPivot on {pole.name}: " +
+                    "Player requires SwingHandAnchor and HingeJoint2D.",
+                    this);
+                return false;
+            }
+
+            InvalidateSwingGrabTemporalState();
+
             Vector2 entryVelocity = rb.velocity;
 
             currentSwingPole = pole;
+            activeSwingMode = requestedMode;
             isSwinging = true;
+            isHandPivotRecovering = false;
             isDashing = false;
             isWallSliding = false;
             wallStickTimer = 0f;
@@ -1233,6 +2048,21 @@ namespace Game.Player
             if (isAttacking)
                 CancelAttack("swing");
 
+            DisableSwingJoints();
+
+            if (activeSwingMode == SwingAttachmentMode.HandPivot)
+                EnterHandPivotSwing(pole, entryVelocity);
+            else
+                EnterRopeSwing(pole, entryVelocity);
+
+            if (debugLogs)
+                Debug.Log($"[SWING] ENTER mode={activeSwingMode} pole={pole.name} anchor={pole.AnchorPosition}");
+
+            return true;
+        }
+
+        private void EnterRopeSwing(SwingPole pole, Vector2 entryVelocity)
+        {
             rb.bodyType = RigidbodyType2D.Dynamic;
             rb.constraints = RigidbodyConstraints2D.FreezeRotation;
             rb.gravityScale = defaultGravityScale;
@@ -1255,16 +2085,69 @@ namespace Game.Player
 
             swingJoint.connectedBody = pole.ConnectedBody;
             swingJoint.connectedAnchor = pole.GetConnectedAnchor();
-            swingJoint.distance = Mathf.Max(0.05f, pole.GetSwingDistance(rb.position));
+            float initialDistance = Mathf.Max(0.05f, pole.GetSwingDistance(rb.position));
+            pole.GetRopeDistanceLimits(
+                initialDistance,
+                out activeRopeMinDistance,
+                out activeRopeMaxDistance);
+            swingJoint.distance = Mathf.Clamp(
+                initialDistance,
+                activeRopeMinDistance,
+                activeRopeMaxDistance);
             swingJoint.enabled = true;
+        }
 
-            if (debugLogs)
-                Debug.Log($"[SWING] ENTER pole={pole.name} anchor={anchor}");
+        private void EnterHandPivotSwing(SwingPole pole, Vector2 entryVelocity)
+        {
+            handPivotCachedBodyType = rb.bodyType;
+            handPivotCachedConstraints = rb.constraints;
+            handPivotUprightRotation = rb.rotation;
+            handPivotExitFacing = facingDir;
+
+            rb.bodyType = RigidbodyType2D.Dynamic;
+            rb.constraints = handPivotCachedConstraints & ~RigidbodyConstraints2D.FreezeRotation;
+            rb.gravityScale = defaultGravityScale;
+            rb.angularVelocity = 0f;
+
+            Vector2 localHandAnchor = transform.InverseTransformPoint(swingHandAnchor.position);
+            Vector2 anchor = pole.AnchorPosition;
+            rb.position += anchor - (Vector2)swingHandAnchor.position;
+
+            handPivotJoint.connectedBody = pole.ConnectedBody;
+            handPivotJoint.anchor = localHandAnchor;
+            handPivotJoint.connectedAnchor = pole.GetConnectedAnchor();
+            handPivotJoint.autoConfigureConnectedAnchor = false;
+            handPivotJoint.useMotor = false;
+
+            JointAngleLimits2D limits = handPivotJoint.limits;
+            limits.min = handPivotMinAngle;
+            limits.max = handPivotMaxAngle;
+            handPivotJoint.limits = limits;
+            handPivotJoint.useLimits = true;
+
+            Vector2 connectedVelocity = GetSwingAnchorVelocity(pole, anchor);
+            Vector2 radial = rb.worldCenterOfMass - anchor;
+            float radius = radial.magnitude;
+            if (radius > 0.0001f)
+            {
+                Vector2 tangent = new Vector2(-radial.y, radial.x) / radius;
+                float tangentialSpeed = Vector2.Dot(entryVelocity - connectedVelocity, tangent);
+                rb.velocity = connectedVelocity + tangent * tangentialSpeed;
+                rb.angularVelocity = tangentialSpeed / radius * Mathf.Rad2Deg;
+            }
+            else
+            {
+                rb.velocity = connectedVelocity;
+                rb.angularVelocity = 0f;
+            }
+
+            handPivotJoint.enabled = true;
         }
 
         private void UpdateSwinging(float inputXClean, float inputYClean)
         {
             input?.CancelCrouchGesture("PlayerController.UpdateSwinging");
+            input?.ClearSwingGrabBuffer();
 
             input.ConsumeAttackPressed();
             input.ConsumeDashPressed();
@@ -1282,6 +2165,12 @@ namespace Game.Player
 
         private void FixedUpdateSwinging()
         {
+            if (activeSwingMode == SwingAttachmentMode.HandPivot)
+            {
+                FixedUpdateHandPivotSwinging();
+                return;
+            }
+
             if (currentSwingPole == null || swingJoint == null || !swingJoint.enabled)
             {
                 ExitSwing(false);
@@ -1291,7 +2180,11 @@ namespace Game.Player
             ClampSwingArc();
 
             float inputX = Mathf.Clamp(input.MoveInput.x, -1f, 1f);
+            float inputY = Mathf.Clamp(input.MoveInput.y, -1f, 1f);
             if (Mathf.Abs(inputX) < wallInputDeadzone) inputX = 0f;
+            if (Mathf.Abs(inputY) < wallInputDeadzone) inputY = 0f;
+
+            UpdateRopeClimb(inputY);
 
             if (inputX != 0f)
             {
@@ -1302,6 +2195,101 @@ namespace Game.Player
                 ApplySwingIdleDamping();
 
             ClampSwingArc();
+        }
+
+        private void UpdateRopeClimb(float inputY)
+        {
+            if (inputY == 0f || currentSwingPole == null ||
+                !currentSwingPole.AllowRopeClimb ||
+                swingJoint == null || !swingJoint.enabled)
+            {
+                return;
+            }
+
+            float climbSpeed = currentSwingPole.RopeClimbSpeed;
+            if (climbSpeed <= 0f)
+                return;
+
+            float targetDistance = inputY > 0f
+                ? activeRopeMinDistance
+                : activeRopeMaxDistance;
+            float nextDistance = Mathf.MoveTowards(
+                swingJoint.distance,
+                targetDistance,
+                climbSpeed * Mathf.Abs(inputY) * Time.fixedDeltaTime);
+
+            if (!Mathf.Approximately(nextDistance, swingJoint.distance))
+                swingJoint.distance = nextDistance;
+        }
+
+        private void FixedUpdateHandPivotSwinging()
+        {
+            if (currentSwingPole == null || handPivotJoint == null || !handPivotJoint.enabled)
+            {
+                ExitSwing(false);
+                return;
+            }
+
+            float inputX = Mathf.Clamp(input.MoveInput.x, -1f, 1f);
+            if (Mathf.Abs(inputX) < wallInputDeadzone) inputX = 0f;
+
+            if (inputX != 0f)
+                ApplyHandPivotTangentialAssist(inputX);
+            else
+                ApplyHandPivotIdleDamping();
+        }
+
+        private void ApplyHandPivotTangentialAssist(float inputX)
+        {
+            Vector2 anchor = currentSwingPole.AnchorPosition;
+            Vector2 radial = rb.worldCenterOfMass - anchor;
+            float radius = radial.magnitude;
+            if (radius <= 0.0001f) return;
+
+            Vector2 tangent = new Vector2(-radial.y, radial.x) / radius;
+            float tangentialInput = Vector2.Dot(Vector2.right * inputX, tangent);
+            if (Mathf.Abs(tangentialInput) <= 0.0001f) return;
+
+            float jointAngle = handPivotJoint.jointAngle;
+            float angleLimit = jointAngle >= 0f
+                ? handPivotMaxAngle
+                : Mathf.Abs(handPivotMinAngle);
+            float angleRatio = Mathf.Abs(jointAngle) / Mathf.Max(1f, angleLimit);
+            float fadeStartRatio = Mathf.Clamp(handPivotAssistFadeStartRatio, 0f, 0.95f);
+            float stopRatio = Mathf.Clamp(
+                handPivotAssistStopRatio,
+                fadeStartRatio + 0.01f,
+                1f);
+            float fadeProgress = Mathf.InverseLerp(fadeStartRatio, stopRatio, angleRatio);
+            float angleMultiplier = 1f - Mathf.SmoothStep(0f, 1f, fadeProgress);
+            if (angleMultiplier <= 0f) return;
+
+            Vector2 relativeVelocity = rb.velocity - GetSwingAnchorVelocity(currentSwingPole, anchor);
+            float tangentialSpeed = Vector2.Dot(relativeVelocity, tangent);
+            bool moving = Mathf.Abs(tangentialSpeed) > Mathf.Max(0f, handPivotRestSpeedThreshold);
+            bool accompanyingMotion = !moving || tangentialSpeed * tangentialInput > 0f;
+            float directionMultiplier = accompanyingMotion
+                ? 1f
+                : Mathf.Max(1f, handPivotCounterInputMultiplier);
+            float forceMagnitude = tangentialInput * handPivotMotorForce *
+                Mathf.Clamp01(handPivotTangentialAssistMultiplier) *
+                directionMultiplier * angleMultiplier;
+
+            rb.AddForce(tangent * forceMagnitude, ForceMode2D.Force);
+        }
+
+        private void ApplyHandPivotIdleDamping()
+        {
+            Vector2 anchor = currentSwingPole.AnchorPosition;
+            Vector2 radial = rb.worldCenterOfMass - anchor;
+            float radius = radial.magnitude;
+            if (radius <= 0.0001f) return;
+
+            Vector2 tangent = new Vector2(-radial.y, radial.x) / radius;
+            Vector2 relativeVelocity = rb.velocity - GetSwingAnchorVelocity(currentSwingPole, anchor);
+            float tangentialSpeed = Vector2.Dot(relativeVelocity, tangent);
+            float damping = Mathf.Max(0f, handPivotIdleTangentialDamping);
+            rb.AddForce(-tangent * tangentialSpeed * damping * rb.mass, ForceMode2D.Force);
         }
 
         private void ApplySwingTangentialAssist(float inputX)
@@ -1403,6 +2391,19 @@ namespace Game.Player
 
         private void ExitSwing(bool jumpRelease, float inputXClean = 0f)
         {
+            if (!isSwinging) return;
+
+            if (activeSwingMode == SwingAttachmentMode.HandPivot)
+            {
+                ExitHandPivotSwing(jumpRelease, inputXClean);
+                return;
+            }
+
+            ExitRopeSwing(jumpRelease, inputXClean);
+        }
+
+        private void ExitRopeSwing(bool jumpRelease, float inputXClean)
+        {
             if (!isSwinging && (swingJoint == null || !swingJoint.enabled)) return;
 
             isSwinging = false;
@@ -1413,6 +2414,9 @@ namespace Game.Player
                 swingJoint.enabled = false;
                 swingJoint.connectedBody = null;
             }
+
+            activeRopeMinDistance = 0.05f;
+            activeRopeMaxDistance = 0.05f;
 
             rb.gravityScale = defaultGravityScale;
             swingCooldownTimer = swingExitCooldown;
@@ -1430,7 +2434,200 @@ namespace Game.Player
             }
 
             if (debugLogs)
-                Debug.Log($"[SWING] EXIT jump={jumpRelease} velocity={rb.velocity}");
+                Debug.Log($"[SWING] EXIT mode=Rope jump={jumpRelease} velocity={rb.velocity}");
+        }
+
+        private void ExitHandPivotSwing(bool jumpRelease, float inputXClean)
+        {
+            Vector2 keptVelocity = rb.velocity * handPivotVelocityKeepMultiplier;
+            int exitDirection = inputXClean != 0f ? (int)Mathf.Sign(inputXClean) : facingDir;
+
+            isSwinging = false;
+            isHandPivotRecovering = true;
+            currentSwingPole = null;
+            handPivotExitFacing = exitDirection;
+
+            if (handPivotJoint != null)
+            {
+                handPivotJoint.enabled = false;
+                handPivotJoint.connectedBody = null;
+            }
+
+            if (swingJoint != null)
+            {
+                swingJoint.enabled = false;
+                swingJoint.connectedBody = null;
+            }
+
+            rb.bodyType = handPivotCachedBodyType;
+            rb.constraints = handPivotCachedConstraints & ~RigidbodyConstraints2D.FreezeRotation;
+            rb.gravityScale = defaultGravityScale;
+            rb.angularVelocity = 0f;
+            swingCooldownTimer = swingExitCooldown;
+
+            rb.velocity = jumpRelease
+                ? keptVelocity + new Vector2(exitDirection * handPivotJumpForceX, handPivotJumpForceY)
+                : keptVelocity;
+
+            if (debugLogs)
+                Debug.Log($"[SWING] EXIT mode=HandPivot jump={jumpRelease} velocity={rb.velocity}");
+        }
+
+        private void UpdateHandPivotRecovery()
+        {
+            input?.CancelCrouchGesture("PlayerController.UpdateHandPivotRecovery");
+            input?.ConsumeAttackPressed();
+            input?.ConsumeDashPressed();
+            input?.ConsumeParryPressed();
+            input?.ConsumeJumpPressed();
+            input?.ConsumeInteractPressed();
+            input?.ClearSwingGrabBuffer();
+        }
+
+        private void FixedUpdateHandPivotRecovery()
+        {
+            rb.angularVelocity = 0f;
+
+            float currentRotation = rb.rotation;
+            float nextRotation = Mathf.MoveTowardsAngle(
+                currentRotation,
+                handPivotUprightRotation,
+                handPivotUprightDegreesPerSecond * Time.fixedDeltaTime);
+
+            if (CanRotateHandPivotColliderTo(nextRotation))
+                rb.MoveRotation(nextRotation);
+
+            if (Mathf.Abs(Mathf.DeltaAngle(currentRotation, handPivotUprightRotation)) <=
+                    handPivotUprightTolerance &&
+                CanRotateHandPivotColliderTo(handPivotUprightRotation))
+            {
+                CompleteHandPivotRecovery();
+            }
+        }
+
+        private bool CanRotateHandPivotColliderTo(float worldRotation)
+        {
+            if (capsule == null || !capsule.enabled) return true;
+
+            Vector3 lossyScale = transform.lossyScale;
+            Vector2 querySize = new Vector2(
+                capsule.size.x * Mathf.Abs(lossyScale.x),
+                capsule.size.y * Mathf.Abs(lossyScale.y));
+            float clearance = Mathf.Max(0.001f, postureClearanceSkin);
+            querySize.x = Mathf.Max(0.01f, querySize.x - clearance * 2f);
+            querySize.y = Mathf.Max(0.01f, querySize.y - clearance * 2f);
+
+            Vector2 scaledOffset = new Vector2(
+                capsule.offset.x * lossyScale.x,
+                capsule.offset.y * lossyScale.y);
+            float radians = worldRotation * Mathf.Deg2Rad;
+            float sin = Mathf.Sin(radians);
+            float cos = Mathf.Cos(radians);
+            Vector2 rotatedOffset = new Vector2(
+                scaledOffset.x * cos - scaledOffset.y * sin,
+                scaledOffset.x * sin + scaledOffset.y * cos);
+            Vector2 queryCenter = rb.position + rotatedOffset;
+
+            ContactFilter2D filter = new ContactFilter2D();
+            filter.SetLayerMask(SolidMask());
+            filter.useLayerMask = true;
+            filter.useTriggers = false;
+
+            int hitCount = Physics2D.OverlapCapsule(
+                queryCenter,
+                querySize,
+                capsule.direction,
+                worldRotation,
+                filter,
+                postureClearanceHits);
+
+            if (hitCount >= postureClearanceHits.Length)
+                return false;
+
+            for (int i = 0; i < hitCount; i++)
+            {
+                Collider2D hit = postureClearanceHits[i];
+                if (hit == null || hit == capsule || hit.isTrigger) continue;
+                if (hit.attachedRigidbody == rb) continue;
+                if (hit.transform == transform || hit.transform.IsChildOf(transform)) continue;
+                return false;
+            }
+
+            return true;
+        }
+
+        private void CompleteHandPivotRecovery()
+        {
+            rb.rotation = handPivotUprightRotation;
+            rb.angularVelocity = 0f;
+            rb.bodyType = handPivotCachedBodyType;
+            rb.constraints = handPivotCachedConstraints;
+            rb.gravityScale = defaultGravityScale;
+
+            isHandPivotRecovering = false;
+            activeSwingMode = SwingAttachmentMode.Rope;
+            ApplyFacing(handPivotExitFacing);
+        }
+
+        private void ForceEndSwingForReset()
+        {
+            bool restoreHandPivotState =
+                activeSwingMode == SwingAttachmentMode.HandPivot || isHandPivotRecovering;
+
+            DisableSwingJoints();
+
+            if (restoreHandPivotState)
+            {
+                rb.bodyType = handPivotCachedBodyType;
+                rb.constraints = handPivotCachedConstraints;
+                rb.gravityScale = defaultGravityScale;
+                rb.rotation = handPivotUprightRotation;
+            }
+            else
+            {
+                rb.gravityScale = defaultGravityScale;
+            }
+
+            rb.angularVelocity = 0f;
+            isSwinging = false;
+            isHandPivotRecovering = false;
+            currentSwingPole = null;
+            activeSwingMode = SwingAttachmentMode.Rope;
+        }
+
+        private void DisableSwingJoints()
+        {
+            if (swingJoint != null)
+            {
+                swingJoint.enabled = false;
+                swingJoint.connectedBody = null;
+            }
+
+            if (handPivotJoint != null)
+            {
+                handPivotJoint.enabled = false;
+                handPivotJoint.connectedBody = null;
+            }
+
+            activeRopeMinDistance = 0.05f;
+            activeRopeMaxDistance = 0.05f;
+        }
+
+        private void InvalidateSwingGrabTemporalState()
+        {
+            unchecked
+            {
+                swingGrabTemporalVersion++;
+            }
+
+            input?.ClearSwingGrabBuffer();
+        }
+
+        private static Vector2 GetSwingAnchorVelocity(SwingPole pole, Vector2 anchor)
+        {
+            return pole != null && pole.ConnectedBody != null
+                ? pole.ConnectedBody.GetPointVelocity(anchor)
+                : Vector2.zero;
         }
 
         private IInteractable GetClosestInteractable()
@@ -1488,6 +2685,928 @@ namespace Game.Player
         // --------------------
         // MOVE / PHYSICS
         // --------------------
+        private bool HandleCrouchCommand(InputReader.CrouchCommand command)
+        {
+            if (sprintCrouchDecisionPending)
+                return ResolvePendingSprintCrouchDecision(command);
+
+            if (CanStartSprintSlide(command))
+            {
+                const string source = "PlayerController.HandleCrouchCommand:SprintDecision";
+                if (input.CrouchHeld && input.TryDeferStandingCrouchShort(source))
+                {
+                    sprintCrouchDecisionPending = true;
+                    pendingSprintCrouchShort = command;
+                    return false;
+                }
+
+                if (TryStartSprintSlide())
+                    return true;
+            }
+
+            ApplyNormalCrouchCommand(command);
+            return false;
+        }
+
+        private bool ResolvePendingSprintCrouchDecision(
+            InputReader.CrouchCommand command)
+        {
+            if (command.IsValid)
+            {
+                if (command.PressType == InputReader.CrouchPressType.Long)
+                {
+                    ClearSprintCrouchDecision();
+                    if (CanStartDirectSprintDive(command) && TryStartDirectSprintDive())
+                        return true;
+
+                    input.ResumeDeferredStandingCrouchShort(
+                        "PlayerController.ResolvePendingSprintCrouchDecision:LongFallback");
+                    ApplyNormalCrouchCommand(command);
+                    return false;
+                }
+
+                if (command.PressType == InputReader.CrouchPressType.Short)
+                {
+                    ClearSprintCrouchDecision();
+                    if (CanStartSprintSlide(command) && TryStartSprintSlide())
+                        return true;
+
+                    ApplyNormalCrouchCommand(command);
+                    return false;
+                }
+            }
+
+            if (!input.CrouchHeld)
+            {
+                ClearSprintCrouchDecision();
+                return false;
+            }
+
+            if (CanMaintainSprintCrouchDecision())
+                return false;
+
+            InputReader.CrouchCommand shortCommand = pendingSprintCrouchShort;
+            input.ResumeDeferredStandingCrouchShort(
+                "PlayerController.ResolvePendingSprintCrouchDecision:StateChanged");
+            ClearSprintCrouchDecision();
+            ApplyNormalCrouchCommand(shortCommand);
+            return false;
+        }
+
+        private void ApplyNormalCrouchCommand(InputReader.CrouchCommand command)
+        {
+            if (!command.IsValid)
+                return;
+
+            if (isGrounded)
+            {
+                TryApplyPostureCommand(
+                    command,
+                    "PlayerController.Update:CrouchCommand");
+                return;
+            }
+
+            TryStandingPostureAndCancelGesture(
+                "PlayerController.Update:CrouchPressWhileAirborne");
+        }
+
+        private bool CanMaintainSprintCrouchDecision()
+        {
+            return
+                isActiveAndEnabled &&
+                !externalControlLocked &&
+                input != null &&
+                input.CurrentPosture == InputReader.PlayerPosture.Standing &&
+                isGrounded &&
+                sprintActive &&
+                input.SprintHeld &&
+                !isDashing &&
+                !isAttacking &&
+                !isHanging &&
+                !isLedgeClimbing &&
+                !IsSwinging &&
+                !isOverheadRailHanging &&
+                !IsMoveLockedByParry &&
+                sprintSlideDiveState == SprintSlideDiveState.None;
+        }
+
+        private bool CanStartDirectSprintDive(InputReader.CrouchCommand command)
+        {
+            return
+                command.IsValid &&
+                command.PressType == InputReader.CrouchPressType.Long &&
+                command.OriginalPosture == InputReader.PlayerPosture.Standing &&
+                command.TargetPosture == InputReader.PlayerPosture.LayDown &&
+                CanMaintainSprintCrouchDecision();
+        }
+
+        private void ClearSprintCrouchDecision()
+        {
+            sprintCrouchDecisionPending = false;
+            pendingSprintCrouchShort = default;
+        }
+
+        private void CancelSprintCrouchDecision(string source, bool cancelGesture)
+        {
+            if (!sprintCrouchDecisionPending)
+                return;
+
+            ClearSprintCrouchDecision();
+            if (cancelGesture)
+                input?.CancelCrouchGesture(source);
+        }
+
+        private bool CanStartSprintSlide(InputReader.CrouchCommand command)
+        {
+            return
+                command.IsValid &&
+                command.PressType == InputReader.CrouchPressType.Short &&
+                command.OriginalPosture == InputReader.PlayerPosture.Standing &&
+                command.TargetPosture == InputReader.PlayerPosture.Crouching &&
+                isGrounded &&
+                sprintActive &&
+                input.SprintHeld &&
+                !isDashing &&
+                !isAttacking &&
+                !isHanging &&
+                !IsSwinging &&
+                sprintSlideDiveState == SprintSlideDiveState.None;
+        }
+
+        private bool TryStartSprintSlide()
+        {
+            const string source = "PlayerController.TryStartSprintSlide";
+            if (!CanChangeColliderProfile(
+                    standingColliderProfile,
+                    slideColliderProfile,
+                    InputReader.PlayerPosture.Crouching,
+                    source))
+                return false;
+
+            float entryVelocityX = InitializeSprintSlideDiveManeuver();
+            sprintSlideDiveState = SprintSlideDiveState.Slide;
+
+            input.ClaimCrouchGesture(source);
+            ApplyColliderProfile(slideColliderProfile);
+            rb.gravityScale = defaultGravityScale;
+            SetHorizontalVelocityWithConveyor(
+                sprintSlideDiveDirection * slideCurrentSpeed);
+
+            if (debugLogs)
+            {
+                Debug.Log(
+                    $"[SLIDE/DIVE] ENTER Slide direction={sprintSlideDiveDirection} " +
+                    $"sprintEntryVx={entryVelocityX:0.00} slideEntrySpeed={slideCurrentSpeed:0.00} " +
+                    $"startX={slideManeuverStartX:0.000}");
+            }
+
+            return true;
+        }
+
+        private float InitializeSprintSlideDiveManeuver()
+        {
+            float entryVelocityX = HorizontalVelocityWithoutConveyor();
+            sprintSlideDiveDirection = Mathf.Abs(entryVelocityX) > 0.05f
+                ? (entryVelocityX < 0f ? -1 : 1)
+                : (facingDir < 0 ? -1 : 1);
+            ApplyFacing(sprintSlideDiveDirection);
+
+            slideElapsed = 0f;
+            slideCurrentSpeed = Mathf.Max(
+                Mathf.Abs(entryVelocityX),
+                Mathf.Max(0f, slideInitialHorizontalSpeed));
+            slideManeuverStartX = rb.position.x;
+            slideManeuverSprintEntryVelocityX = entryVelocityX;
+            slideManeuverInitialSpeed = slideCurrentSpeed;
+            forwardDiveStartX = slideManeuverStartX;
+            forwardDiveTakeoffX = slideManeuverStartX;
+            hasForwardDiveTakeoffSample = false;
+            postDiveSlideLandingX = slideManeuverStartX;
+            combinedSlideToTakeoffDistance = 0f;
+            combinedDiveAirDistance = 0f;
+            diveElapsed = 0f;
+            diveHasLeftGround = false;
+
+            if (hasPendingNormalJump)
+                animDriver?.CancelJumpStart();
+            hasPendingNormalJump = false;
+            pendingNormalJumpTimer = 0f;
+            normalJumpAnticipationAge = 0f;
+            jumpBufferTimer = 0f;
+            isWallSliding = false;
+            ResetSlopeMovementCarry();
+            ClearSprintMomentum();
+            DropCarriedObject();
+
+            return entryVelocityX;
+        }
+
+        private void UpdateSprintSlideDive()
+        {
+            DiscardInputsDuringSprintSlideDive();
+
+            if (IsSliding)
+            {
+                slideElapsed += Time.deltaTime;
+
+                if (input.CrouchHeld && slideElapsed >= Mathf.Max(0.01f, diveHoldTime))
+                {
+                    if (TryStartForwardDive())
+                        return;
+                }
+
+                float slideEndTime = Mathf.Max(0.05f, slideDuration);
+                if (input.CrouchHeld)
+                    slideEndTime = Mathf.Max(slideEndTime, Mathf.Max(0.01f, diveHoldTime));
+                if (slideElapsed >= slideEndTime)
+                    TryFinishSlideInCrouch();
+
+                return;
+            }
+
+            if (!IsDiving) return;
+
+            diveElapsed += Time.deltaTime;
+            UpdateDiveLandingState();
+        }
+
+        private void FixedUpdateSprintSlideDive()
+        {
+            if (IsPostDiveSliding)
+            {
+                FixedUpdatePostDiveSlide();
+                return;
+            }
+
+            if (IsSliding)
+            {
+                slideCurrentSpeed = Mathf.MoveTowards(
+                    slideCurrentSpeed,
+                    0f,
+                    Mathf.Max(0f, slideDeceleration) * Time.fixedDeltaTime);
+
+                if (ShouldUseSlopeMovement())
+                {
+                    Vector2 tangent = new Vector2(groundNormal.y, -groundNormal.x).normalized;
+                    rb.velocity =
+                        tangent * (sprintSlideDiveDirection * slideCurrentSpeed) -
+                        groundNormal * slopeStickSpeed;
+                    appliedConveyorVelocityX = 0f;
+                }
+                else
+                {
+                    SetHorizontalVelocityWithConveyor(
+                        sprintSlideDiveDirection * slideCurrentSpeed);
+                }
+
+                if (!isGrounded)
+                    ApplyBetterJumpGravity();
+                ApplyMovingPlatformDelta();
+                return;
+            }
+
+            if (!IsDiving) return;
+
+            UpdateDiveLandingState();
+            if (IsDiving)
+                ApplyBetterJumpGravity();
+        }
+
+        private bool TryStartForwardDive()
+        {
+            const string source = "PlayerController.TryStartForwardDive";
+            if (!CanChangeColliderProfile(
+                    slideColliderProfile,
+                    diveColliderProfile,
+                    InputReader.PlayerPosture.Standing,
+                    source))
+                return false;
+
+            return EnterForwardDive("Slide -> Dive");
+        }
+
+        private bool TryStartDirectSprintDive()
+        {
+            const string source = "PlayerController.TryStartDirectSprintDive";
+            if (!CanChangeColliderProfile(
+                    standingColliderProfile,
+                    diveColliderProfile,
+                    InputReader.PlayerPosture.Standing,
+                    source))
+            {
+                return false;
+            }
+
+            InitializeSprintSlideDiveManeuver();
+            input.ClaimCrouchGesture(source);
+            return EnterForwardDive("Sprint -> Dive");
+        }
+
+        private bool EnterForwardDive(string transition)
+        {
+            ApplyColliderProfile(diveColliderProfile);
+            forwardDiveStartX = rb.position.x;
+            hasForwardDiveTakeoffSample = false;
+            sprintSlideDiveState = SprintSlideDiveState.Dive;
+            diveElapsed = 0f;
+            diveHasLeftGround = false;
+            ResetDiveRecoveryTracking();
+            slopeMovementSuppressedUntilAirborne = true;
+            ResetSlopeMovementCarry();
+            DetachConveyorForTakeoff();
+
+            float forwardSpeed = Mathf.Max(Mathf.Abs(rb.velocity.x), slideCurrentSpeed);
+            rb.gravityScale = defaultGravityScale;
+            rb.velocity = new Vector2(
+                sprintSlideDiveDirection * forwardSpeed,
+                Mathf.Max(0f, rb.velocity.y));
+            rb.AddForce(
+                new Vector2(
+                    sprintSlideDiveDirection * Mathf.Max(0f, diveHorizontalImpulse),
+                    Mathf.Max(0f, diveVerticalImpulse)),
+                ForceMode2D.Impulse);
+            lastDiveAirborneVelocityX = rb.velocity.x;
+            preservedDiveAirborneVelocityX = rb.velocity.x;
+            hasDiveAirborneVelocitySample = true;
+
+            if (debugLogs)
+            {
+                float slideToDiveStartDistance = DirectedHorizontalDistance(
+                    slideManeuverStartX,
+                    forwardDiveStartX,
+                    sprintSlideDiveDirection);
+                Debug.Log(
+                    $"[SLIDE/DIVE] {transition} direction={sprintSlideDiveDirection} velocity={rb.velocity} " +
+                    $"slideToDiveStartDx={slideToDiveStartDistance:0.000}");
+            }
+
+            return true;
+        }
+
+        private bool TryFinishSlideInCrouch()
+        {
+            if (!TryApplyPostureFromProfile(
+                    slideColliderProfile,
+                    InputReader.PlayerPosture.Crouching,
+                    "PlayerController.TryFinishSlideInCrouch"))
+                return false;
+
+            int slideDirection = sprintSlideDiveDirection;
+            float normalSlideDistance = DirectedHorizontalDistance(
+                slideManeuverStartX,
+                rb.position.x,
+                slideDirection);
+            sprintSlideDiveState = SprintSlideDiveState.None;
+            slideElapsed = 0f;
+            slideCurrentSpeed = 0f;
+            sprintSlideDiveDirection = 0;
+
+            if (debugLogs)
+            {
+                Debug.Log(
+                    $"[SLIDE/DIVE DISTANCE] NormalSlide " +
+                    $"sprintEntryVx={slideManeuverSprintEntryVelocityX:0.00} " +
+                    $"slideEntrySpeed={slideManeuverInitialSpeed:0.00} " +
+                    $"slideDx={normalSlideDistance:0.000} exitVx={rb.velocity.x:0.00}");
+            }
+
+            return true;
+        }
+
+        private void UpdateDiveLandingState()
+        {
+            if (!IsDiving) return;
+
+            bool hasFrontContact = TryGetDiveFrontContact(out RaycastHit2D frontHit);
+            bool hasPhysicalSupport = TryGetDiveSupportContact(out _);
+            bool landed = isGrounded || hasPhysicalSupport;
+
+            if (hasFrontContact && !diveFrontContactWasActive && debugLogs)
+            {
+                Debug.Log(
+                    $"[SLIDE/DIVE] FRONT CONTACT state={sprintSlideDiveState} " +
+                    $"grounded={isGrounded} support={hasPhysicalSupport} velocity={rb.velocity} " +
+                    $"collider={DescribeCollider2D(frontHit.collider)}");
+            }
+            diveFrontContactWasActive = hasFrontContact;
+
+            if (hasFrontContact)
+            {
+                // Never restore velocity sampled before a real frontal collision.
+                hasDiveAirborneVelocitySample = false;
+                preservedDiveAirborneVelocityX = 0f;
+            }
+
+            if (!landed)
+            {
+                if (!diveHasLeftGround)
+                {
+                    forwardDiveTakeoffX = rb.position.x;
+                    hasForwardDiveTakeoffSample = true;
+                    if (debugLogs)
+                    {
+                        float slideToTakeoffDistance = DirectedHorizontalDistance(
+                            slideManeuverStartX,
+                            forwardDiveTakeoffX,
+                            sprintSlideDiveDirection);
+                        Debug.Log(
+                            $"[SLIDE/DIVE DISTANCE] DiveTakeoff " +
+                            $"slideToTakeoffDx={slideToTakeoffDistance:0.000} " +
+                            $"takeoffX={forwardDiveTakeoffX:0.000} vx={rb.velocity.x:0.00}");
+                    }
+                }
+                diveHasLeftGround = true;
+                diveProneRejectedSince = -1f;
+                if (!hasFrontContact && rb.velocity.y < -0.01f)
+                {
+                    lastDiveAirborneVelocityX = rb.velocity.x;
+                    float forwardVelocity = rb.velocity.x * sprintSlideDiveDirection;
+                    if (forwardVelocity < -0.01f)
+                    {
+                        hasDiveAirborneVelocitySample = false;
+                        preservedDiveAirborneVelocityX = 0f;
+                    }
+                    else if (forwardVelocity > 0.01f)
+                    {
+                        if (!hasDiveAirborneVelocitySample ||
+                            Mathf.Abs(rb.velocity.x) > Mathf.Abs(preservedDiveAirborneVelocityX))
+                            preservedDiveAirborneVelocityX = rb.velocity.x;
+                        hasDiveAirborneVelocitySample = true;
+                    }
+                }
+                return;
+            }
+
+            const float groundedFallbackTime = 0.12f;
+            if (!diveHasLeftGround && diveElapsed < groundedFallbackTime) return;
+
+            if (TryFinishDiveInProne(hasFrontContact)) return;
+
+            if (diveProneRejectedSince < 0f)
+            {
+                diveProneRejectedSince = Time.time;
+                if (debugLogs)
+                {
+                    Debug.LogWarning(
+                        $"[SLIDE/DIVE] Dive -> Prone rejected state={sprintSlideDiveState} " +
+                        $"grounded={isGrounded} support={hasPhysicalSupport} velocity={rb.velocity} " +
+                        $"frontContact={hasFrontContact} reason={lastPostureClearanceFailureReason}");
+                }
+            }
+
+            if (Time.time - diveProneRejectedSince < Mathf.Max(0f, diveBlockedRecoveryDelay))
+                return;
+
+            TryRecoverDiveAfterBlockedLanding(hasFrontContact);
+        }
+
+        private bool TryFinishDiveInProne(bool hasFrontContact)
+        {
+            const string source = "PlayerController.TryFinishDiveInProne";
+            int landingDirection = sprintSlideDiveDirection;
+            float resolvedVelocityX = rb.velocity.x;
+            float preLandingVelocityX = lastDiveAirborneVelocityX;
+            float preservedVelocityX = preservedDiveAirborneVelocityX;
+            bool canRestoreAirborneVelocity =
+                !hasFrontContact &&
+                hasDiveAirborneVelocitySample &&
+                landingDirection != 0 &&
+                Mathf.Sign(preservedVelocityX) == landingDirection &&
+                Mathf.Abs(preservedVelocityX) > Mathf.Abs(resolvedVelocityX);
+            float landingVelocityX = canRestoreAirborneVelocity
+                ? preservedVelocityX
+                : resolvedVelocityX;
+            if (!TryApplyPostureFromProfile(
+                    diveColliderProfile,
+                    InputReader.PlayerPosture.LayDown,
+                    source,
+                    false) &&
+                !TryApplyPostureFromProfilePreservingBottom(
+                    diveColliderProfile,
+                    InputReader.PlayerPosture.LayDown,
+                    source,
+                    false))
+                return false;
+
+            bool keepSliding =
+                Mathf.Abs(landingVelocityX) > Mathf.Max(0f, postDiveSlideStopSpeed);
+            sprintSlideDiveState = keepSliding
+                ? SprintSlideDiveState.ProneSlide
+                : SprintSlideDiveState.None;
+            slideElapsed = 0f;
+            slideCurrentSpeed = 0f;
+            diveElapsed = 0f;
+            diveHasLeftGround = false;
+            sprintSlideDiveDirection = keepSliding
+                ? (landingVelocityX < 0f ? -1 : 1)
+                : 0;
+            slopeMovementSuppressedUntilAirborne = false;
+            suppressConveyorUntilAirborne = false;
+            rb.gravityScale = defaultGravityScale;
+            rb.angularVelocity = 0f;
+            postDiveSlideLandingX = rb.position.x;
+            float takeoffX = hasForwardDiveTakeoffSample
+                ? forwardDiveTakeoffX
+                : forwardDiveStartX;
+            combinedSlideToTakeoffDistance = DirectedHorizontalDistance(
+                slideManeuverStartX,
+                takeoffX,
+                landingDirection);
+            combinedDiveAirDistance = DirectedHorizontalDistance(
+                takeoffX,
+                postDiveSlideLandingX,
+                landingDirection);
+
+            if (keepSliding)
+            {
+                // Collider changes do not get to discard valid Dive momentum. A frontal
+                // contact invalidates the airborne sample above, so walls cannot add speed.
+                rb.velocity = new Vector2(landingVelocityX, rb.velocity.y);
+                appliedConveyorVelocityX = 0f;
+                postDiveSlideCurrentSpeed = Mathf.Abs(landingVelocityX);
+                postDiveSlideEntryVelocityX = landingVelocityX;
+                postDiveSlideGroundedGraceTimer = Mathf.Max(0f, postDiveSlideGroundedGraceTime);
+                postDiveSlideDebugLogTimer = 0f;
+            }
+            else
+            {
+                postDiveSlideCurrentSpeed = 0f;
+                postDiveSlideEntryVelocityX = 0f;
+                rb.velocity = new Vector2(0f, rb.velocity.y);
+                appliedConveyorVelocityX = 0f;
+            }
+
+            if (debugLogs)
+            {
+                string preLandingSpeed = hasDiveAirborneVelocitySample
+                    ? preLandingVelocityX.ToString("0.00")
+                    : "n/a";
+                string preservedSpeed = hasDiveAirborneVelocitySample
+                    ? preservedVelocityX.ToString("0.00")
+                    : "n/a";
+                string transition = keepSliding
+                    ? "ENTER ProneSlide"
+                    : "LAND Dive -> Prone";
+                float expectedProneDistance = CalculateExpectedPostDiveSlideDistance(
+                    landingVelocityX);
+                Debug.Log(
+                    $"[SLIDE/DIVE] {transition} preLandingVx={preLandingSpeed} " +
+                    $"preservedVx={preservedSpeed} resolvedVx={resolvedVelocityX:0.00} " +
+                    $"entryVx={rb.velocity.x:0.00} " +
+                    $"restored={canRestoreAirborneVelocity} frontContact={hasFrontContact} " +
+                    $"active={keepSliding} decel={postDiveSlideDeceleration:0.00} " +
+                    $"expectedProneDx={expectedProneDistance:0.000}");
+            }
+
+            if (!keepSliding)
+                LogCombinedManeuverDistance(landingDirection, "no-prone-slide", resolvedVelocityX);
+
+            ResetDiveRecoveryTracking();
+
+            return true;
+        }
+
+        private bool TryRecoverDiveAfterBlockedLanding(bool hasFrontContact)
+        {
+            const string source = "PlayerController.TryRecoverDiveAfterBlockedLanding";
+            InputReader.PlayerPosture recoveredPosture = InputReader.PlayerPosture.Crouching;
+            bool recovered =
+                TryApplyPostureFromProfilePreservingBottom(
+                    diveColliderProfile,
+                    recoveredPosture,
+                    source,
+                    false) ||
+                TryApplyPostureFromProfile(
+                    diveColliderProfile,
+                    recoveredPosture,
+                    source,
+                    false);
+
+            if (!recovered)
+            {
+                recoveredPosture = InputReader.PlayerPosture.Standing;
+                recovered =
+                    TryApplyPostureFromProfilePreservingBottom(
+                        diveColliderProfile,
+                        recoveredPosture,
+                        source,
+                        false) ||
+                    TryApplyPostureFromProfile(
+                        diveColliderProfile,
+                        recoveredPosture,
+                        source,
+                        false);
+            }
+
+            if (!recovered)
+            {
+                recoveredPosture = InputReader.PlayerPosture.LayDown;
+                input.CommitPosture(recoveredPosture, source);
+                isUsingDiveColliderRecoveryProfile = true;
+            }
+            else
+            {
+                isUsingDiveColliderRecoveryProfile = false;
+            }
+
+            sprintSlideDiveState = SprintSlideDiveState.None;
+            slideElapsed = 0f;
+            slideCurrentSpeed = 0f;
+            diveElapsed = 0f;
+            diveHasLeftGround = false;
+            sprintSlideDiveDirection = 0;
+            slopeMovementSuppressedUntilAirborne = false;
+            suppressConveyorUntilAirborne = false;
+            rb.gravityScale = defaultGravityScale;
+            rb.angularVelocity = 0f;
+            ResetSlopeMovementCarry();
+            ResetDiveRecoveryTracking();
+
+            if (debugLogs)
+            {
+                Debug.LogWarning(
+                    $"[SLIDE/DIVE] SAFE RECOVERY Dive -> {recoveredPosture} " +
+                    $"velocity={rb.velocity} frontContact={hasFrontContact} " +
+                    $"temporaryDiveCollider={isUsingDiveColliderRecoveryProfile}");
+            }
+
+            return true;
+        }
+
+        private void TryResolveDiveColliderRecoveryProfile()
+        {
+            if (!isUsingDiveColliderRecoveryProfile || !isGrounded) return;
+
+            const string source = "PlayerController.TryResolveDiveColliderRecoveryProfile";
+            if (!TryApplyPostureFromProfile(
+                    diveColliderProfile,
+                    InputReader.PlayerPosture.LayDown,
+                    source,
+                    false) &&
+                !TryApplyPostureFromProfilePreservingBottom(
+                    diveColliderProfile,
+                    InputReader.PlayerPosture.LayDown,
+                    source,
+                    false))
+                return;
+
+            isUsingDiveColliderRecoveryProfile = false;
+            if (debugLogs)
+                Debug.Log("[SLIDE/DIVE] RECOVERY collider Dive -> Prone completed");
+        }
+
+        private bool TryGetDiveSupportContact(out RaycastHit2D supportHit)
+        {
+            supportHit = default;
+            if (capsule == null || !capsule.enabled) return false;
+
+            ContactFilter2D filter = new ContactFilter2D();
+            filter.SetLayerMask(SolidMask());
+            filter.useLayerMask = true;
+            filter.useTriggers = false;
+
+            int hitCount = capsule.Cast(
+                Vector2.down,
+                filter,
+                groundHits,
+                Mathf.Max(0.005f, diveContactProbeDistance));
+            float bestNormalY = float.NegativeInfinity;
+            for (int i = 0; i < hitCount; i++)
+            {
+                RaycastHit2D candidate = groundHits[i];
+                if (candidate.collider == null || candidate.collider == capsule) continue;
+                if (candidate.collider.isTrigger) continue;
+                if (candidate.normal.y < groundNormalMinY) continue;
+                if (candidate.normal.y <= bestNormalY) continue;
+
+                bestNormalY = candidate.normal.y;
+                supportHit = candidate;
+            }
+
+            return supportHit.collider != null;
+        }
+
+        private bool TryGetDiveFrontContact(out RaycastHit2D frontHit)
+        {
+            frontHit = default;
+            if (sprintSlideDiveDirection == 0) return false;
+
+            return TryGetWallHitOnSide(
+                sprintSlideDiveDirection,
+                Mathf.Max(0.005f, diveContactProbeDistance),
+                out frontHit);
+        }
+
+        private void ResetDiveRecoveryTracking()
+        {
+            diveProneRejectedSince = -1f;
+            diveFrontContactWasActive = false;
+            lastDiveAirborneVelocityX = 0f;
+            preservedDiveAirborneVelocityX = 0f;
+            hasDiveAirborneVelocitySample = false;
+            lastPostureClearanceFailureReason = "none";
+        }
+
+        private void FixedUpdatePostDiveSlide()
+        {
+            bool hasPhysicalSupport = TryGetDiveSupportContact(out RaycastHit2D supportHit);
+            bool hasSlideSupport = isGrounded || hasPhysicalSupport;
+            if (hasSlideSupport)
+            {
+                postDiveSlideGroundedGraceTimer = Mathf.Max(0f, postDiveSlideGroundedGraceTime);
+            }
+            else
+            {
+                postDiveSlideGroundedGraceTimer = Mathf.Max(
+                    0f,
+                    postDiveSlideGroundedGraceTimer - Time.fixedDeltaTime);
+                ApplyBetterJumpGravity();
+                LogPostDiveSlideProgress(false, "ground-grace");
+
+                if (postDiveSlideGroundedGraceTimer <= 0f)
+                    FinishPostDiveSlide(false, "ground-contact-lost");
+                return;
+            }
+
+            float stopSpeed = Mathf.Max(0f, postDiveSlideStopSpeed);
+            if (postDiveSlideCurrentSpeed <= stopSpeed)
+            {
+                FinishPostDiveSlide(true, "speed-at-or-below-threshold");
+                ApplyMovingPlatformDelta();
+                return;
+            }
+
+            if (TryGetDiveFrontContact(out RaycastHit2D frontHit))
+            {
+                FinishPostDiveSlide(
+                    true,
+                    $"front-contact:{DescribeCollider2D(frontHit.collider)}");
+                return;
+            }
+
+            float physicalForwardSpeed =
+                HorizontalVelocityWithoutConveyor() * sprintSlideDiveDirection;
+            if (physicalForwardSpeed < -stopSpeed)
+            {
+                FinishPostDiveSlide(false, "velocity-reversed");
+                return;
+            }
+
+            // Natural acceleration in the current direction is allowed. Solver reductions
+            // from supporting contacts do not become extra, unconfigured deceleration.
+            postDiveSlideCurrentSpeed = Mathf.Max(
+                postDiveSlideCurrentSpeed,
+                Mathf.Max(0f, physicalForwardSpeed));
+            postDiveSlideCurrentSpeed = Mathf.MoveTowards(
+                postDiveSlideCurrentSpeed,
+                0f,
+                Mathf.Max(0.01f, postDiveSlideDeceleration) * Time.fixedDeltaTime);
+
+            if (postDiveSlideCurrentSpeed <= stopSpeed)
+            {
+                FinishPostDiveSlide(true, "decelerated-to-threshold");
+                ApplyMovingPlatformDelta();
+                return;
+            }
+
+            float nextVelocityX = sprintSlideDiveDirection * postDiveSlideCurrentSpeed;
+
+            Vector2 slideGroundNormal = isGrounded
+                ? groundNormal
+                : supportHit.normal.normalized;
+            bool useSlopeMovement =
+                slideGroundNormal.y >= groundNormalMinY &&
+                slideGroundNormal.y < SlopeNormalMaxY &&
+                !slopeMovementSuppressedUntilAirborne;
+            if (useSlopeMovement)
+            {
+                Vector2 tangent = new Vector2(slideGroundNormal.y, -slideGroundNormal.x).normalized;
+                float surfaceSpeed = nextVelocityX / tangent.x;
+                Vector2 slopeVelocity =
+                    tangent * surfaceSpeed - slideGroundNormal * slopeStickSpeed;
+                slopeVelocity.x = nextVelocityX;
+                rb.velocity = slopeVelocity;
+                appliedConveyorVelocityX = 0f;
+            }
+            else
+            {
+                SetHorizontalVelocityWithConveyor(nextVelocityX);
+            }
+
+            LogPostDiveSlideProgress(hasSlideSupport, "sliding");
+            ApplyMovingPlatformDelta();
+        }
+
+        private void LogPostDiveSlideProgress(bool hasSupport, string phase)
+        {
+            if (!debugLogs) return;
+
+            postDiveSlideDebugLogTimer -= Time.fixedDeltaTime;
+            if (postDiveSlideDebugLogTimer > 0f) return;
+
+            postDiveSlideDebugLogTimer = 0.25f;
+            Debug.Log(
+                $"[SLIDE/DIVE] ProneSlide phase={phase} vx={rb.velocity.x:0.00} " +
+                $"controlledSpeed={postDiveSlideCurrentSpeed:0.00} " +
+                $"grounded={isGrounded} support={hasSupport} " +
+                $"groundGrace={postDiveSlideGroundedGraceTimer:0.000}");
+        }
+
+        private void FinishPostDiveSlide(bool stopHorizontal, string reason)
+        {
+            int slideDirection = sprintSlideDiveDirection;
+            float velocityBeforeExitX = rb.velocity.x;
+            sprintSlideDiveState = SprintSlideDiveState.None;
+            sprintSlideDiveDirection = 0;
+            postDiveSlideCurrentSpeed = 0f;
+            postDiveSlideGroundedGraceTimer = 0f;
+            postDiveSlideDebugLogTimer = 0f;
+            ResetSlopeMovementCarry();
+
+            if (stopHorizontal)
+                SetHorizontalVelocityWithConveyor(0f);
+
+            if (debugLogs)
+            {
+                Debug.Log(
+                    $"[SLIDE/DIVE] EXIT ProneSlide reason={reason} " +
+                    $"preExitVx={velocityBeforeExitX:0.00} exitVx={rb.velocity.x:0.00} " +
+                    $"grounded={isGrounded}");
+            }
+
+            LogCombinedManeuverDistance(slideDirection, reason, velocityBeforeExitX);
+            postDiveSlideEntryVelocityX = 0f;
+        }
+
+        private void LogCombinedManeuverDistance(
+            int direction,
+            string reason,
+            float velocityBeforeExitX)
+        {
+            if (!debugLogs) return;
+
+            float proneSlideDistance = DirectedHorizontalDistance(
+                postDiveSlideLandingX,
+                rb.position.x,
+                direction);
+            float totalDistance = DirectedHorizontalDistance(
+                slideManeuverStartX,
+                rb.position.x,
+                direction);
+            Debug.Log(
+                $"[SLIDE/DIVE DISTANCE] Combined reason={reason} " +
+                $"sprintEntryVx={slideManeuverSprintEntryVelocityX:0.00} " +
+                $"slideEntrySpeed={slideManeuverInitialSpeed:0.00} " +
+                $"slideToTakeoffDx={combinedSlideToTakeoffDistance:0.000} " +
+                $"diveAirDx={combinedDiveAirDistance:0.000} " +
+                $"proneSlideDx={proneSlideDistance:0.000} " +
+                $"expectedProneDx={CalculateExpectedPostDiveSlideDistance(postDiveSlideEntryVelocityX):0.000} " +
+                $"totalDx={totalDistance:0.000} " +
+                $"proneEntryVx={postDiveSlideEntryVelocityX:0.00} " +
+                $"pronePreExitVx={velocityBeforeExitX:0.00} exitVx={rb.velocity.x:0.00}");
+        }
+
+        private float CalculateExpectedPostDiveSlideDistance(float entryVelocityX)
+        {
+            float entrySpeed = Mathf.Abs(entryVelocityX);
+            float stopSpeed = Mathf.Min(entrySpeed, Mathf.Max(0f, postDiveSlideStopSpeed));
+            float deceleration = Mathf.Max(0.01f, postDiveSlideDeceleration);
+            return Mathf.Max(
+                0f,
+                (entrySpeed * entrySpeed - stopSpeed * stopSpeed) / (2f * deceleration));
+        }
+
+        private static float DirectedHorizontalDistance(float startX, float endX, int direction)
+        {
+            int safeDirection = direction < 0 ? -1 : 1;
+            return (endX - startX) * safeDirection;
+        }
+
+        private void DiscardInputsDuringSprintSlideDive()
+        {
+            input.ConsumeJumpPressed();
+            input.ConsumeAttackPressed();
+            input.ConsumeDashPressed();
+            input.ConsumeParryPressed();
+            input.ConsumeInteractPressed();
+            input.ClearSwingGrabBuffer();
+        }
+
+        private void CancelSprintSlideDiveForReset()
+        {
+            sprintSlideDiveState = SprintSlideDiveState.None;
+            slideElapsed = 0f;
+            slideCurrentSpeed = 0f;
+            diveElapsed = 0f;
+            diveHasLeftGround = false;
+            sprintSlideDiveDirection = 0;
+            postDiveSlideCurrentSpeed = 0f;
+            postDiveSlideEntryVelocityX = 0f;
+            postDiveSlideGroundedGraceTimer = 0f;
+            postDiveSlideDebugLogTimer = 0f;
+            ResetDiveRecoveryTracking();
+        }
+
         private void UpdateSprintTimers(float deltaTime)
         {
             if (isGrounded)
@@ -1564,8 +3683,8 @@ namespace Game.Player
 
         private void CaptureSprintMomentum()
         {
-            float speed = Mathf.Abs(rb.velocity.x);
-            if (speed <= Mathf.Max(stats.maxRunSpeed, 0f) + 0.01f)
+            float speed = Mathf.Abs(HorizontalVelocityWithoutConveyor());
+            if (speed <= Mathf.Max(GetEffectiveRunSpeed(), 0f) + 0.01f)
                 return;
 
             sprintMomentumSpeed = speed;
@@ -1651,6 +3770,10 @@ namespace Game.Player
 
         private void Move()
         {
+            // Preserve the exact takeoff velocity until the ground probe confirms airborne.
+            if (suppressConveyorUntilAirborne && isGrounded)
+                return;
+
             float inputX = Mathf.Clamp(input.MoveInput.x, -1f, 1f);
 
             if (wallJumpLockTimer > 0f)
@@ -1666,13 +3789,21 @@ namespace Game.Player
             else if (sprintActive) stanceMult = sprintSpeedMultiplier;
             if (IsCarrying) stanceMult *= carryingMoveSpeedMultiplier;
 
-            float targetSpeed = inputX * stats.maxRunSpeed * stanceMult;
+            float targetSpeed = inputX * GetEffectiveRunSpeed() * stanceMult;
             targetSpeed = ApplySprintMomentumTarget(inputX, targetSpeed);
             if (hasPendingNormalJump)
                 targetSpeed *= jumpAnticipationMoveSpeedMultiplier;
 
             float accel = isGrounded ? stats.groundAcceleration : stats.airAcceleration;
             float decel = isGrounded ? stats.groundDeceleration : stats.airDeceleration;
+            float turnResponsiveness = stats.turnAccelerationMultiplier;
+
+            if (isGrounded && IsSlippery)
+            {
+                accel *= slipperyGroundAccelerationMultiplier;
+                decel *= slipperyGroundDecelerationMultiplier;
+                turnResponsiveness *= slipperyTurnResponsivenessMultiplier;
+            }
 
             float rate = Mathf.Abs(inputX) > 0.01f ? accel : decel;
 
@@ -1695,7 +3826,7 @@ namespace Game.Player
                     Mathf.Abs(slopeHorizontalSpeed) > 0.1f;
 
                 if (changingSlopeDirection)
-                    horizontalRate *= stats.turnAccelerationMultiplier;
+                    horizontalRate *= turnResponsiveness;
 
                 slopeHorizontalSpeed = Mathf.MoveTowards(
                     slopeHorizontalSpeed,
@@ -1727,6 +3858,7 @@ namespace Game.Player
                     slopeHorizontalSpeed,
                     rb.velocity.y
                 );
+                appliedConveyorVelocityX = 0f;
             }
 
             wasUsingSlopeMovementLastMove = false;
@@ -1734,18 +3866,21 @@ namespace Game.Player
 
             bool changingDirection =
                 Mathf.Abs(targetSpeed) > 0.01f &&
-                Mathf.Sign(targetSpeed) != Mathf.Sign(rb.velocity.x) &&
-                Mathf.Abs(rb.velocity.x) > 0.1f;
+                Mathf.Sign(targetSpeed) != Mathf.Sign(HorizontalVelocityWithoutConveyor()) &&
+                Mathf.Abs(HorizontalVelocityWithoutConveyor()) > 0.1f;
 
             if (changingDirection)
-                rate *= stats.turnAccelerationMultiplier;
+                rate *= turnResponsiveness;
 
-            float newVelX = Mathf.MoveTowards(rb.velocity.x, targetSpeed, rate * Time.fixedDeltaTime);
+            float newVelX = Mathf.MoveTowards(
+                HorizontalVelocityWithoutConveyor(),
+                targetSpeed,
+                rate * Time.fixedDeltaTime);
 
             if (isGrounded && Mathf.Abs(inputX) < 0.01f && Mathf.Abs(newVelX) < 0.02f)
                 newVelX = 0f;
 
-            rb.velocity = new Vector2(newVelX, rb.velocity.y);
+            SetHorizontalVelocityWithConveyor(newVelX);
             UpdateSprintMomentumFromVelocity(newVelX);
         }
 
@@ -1776,9 +3911,47 @@ namespace Game.Player
 
         private void Jump()
         {
-            float jumpForce = stats.jumpForce * (IsCarrying ? carryingJumpForceMultiplier : 1f);
+            float jumpForce = GetEffectiveJumpForce() * (IsCarrying ? carryingJumpForceMultiplier : 1f);
+            DetachConveyorForTakeoff();
             slopeMovementSuppressedUntilAirborne = true;
             rb.velocity = new Vector2(rb.velocity.x, jumpForce);
+        }
+
+        private bool TryUseDoubleJump()
+        {
+            if (!doubleJumpEquipped || !doubleJumpAvailable || isGrounded ||
+                coyoteTimer > 0f || hasPendingNormalJump)
+            {
+                return false;
+            }
+
+            ApplyJumpInputFacing();
+            animDriver?.TriggerJumpStart();
+            Jump();
+            doubleJumpAvailable = false;
+            return true;
+        }
+
+        private float GetEffectiveRunSpeed()
+        {
+            if (progressionStats == null)
+                progressionStats = GetComponent<PlayerStatsRuntime>();
+
+            float fallback = stats != null ? stats.maxRunSpeed : 0f;
+            return progressionStats != null
+                ? progressionStats.GetEffectiveRunSpeed(fallback)
+                : fallback;
+        }
+
+        private float GetEffectiveJumpForce()
+        {
+            if (progressionStats == null)
+                progressionStats = GetComponent<PlayerStatsRuntime>();
+
+            float fallback = stats != null ? stats.jumpForce : 0f;
+            return progressionStats != null
+                ? progressionStats.GetEffectiveJumpForce(fallback)
+                : fallback;
         }
 
         private void StartPendingNormalJump()
@@ -1877,7 +4050,7 @@ namespace Game.Player
         // --------------------
         private void TryStartDash()
         {
-            if (isSwinging) return;
+            if (IsSwinging || isOverheadRailHanging || IsSliding || IsDiving) return;
             if (IsCrouching || IsLayDown) return;
             if (isDashing) return;
             if (dashCooldownTimer > 0f) return;
@@ -1909,10 +4082,9 @@ namespace Game.Player
             dashCooldownTimer = stats.dashCooldown;
 
             rb.gravityScale = 0f;
-            rb.velocity =
-                Vector2.right *
-                dashHorizontalSign *
-                stats.dashSpeed;
+            SetHorizontalVelocityWithConveyor(
+                dashHorizontalSign * stats.dashSpeed);
+            rb.velocity = new Vector2(rb.velocity.x, 0f);
         }
 
         private void UpdateDash()
@@ -1942,6 +4114,7 @@ namespace Game.Player
                 rb.velocity =
                     signedTangent * stats.dashSpeed -
                     slopeNormal * slopeStickSpeed;
+                appliedConveyorVelocityX = 0f;
                 dashFollowingSlope = true;
                 return;
             }
@@ -1949,10 +4122,9 @@ namespace Game.Player
             if (!dashFollowingSlope)
                 return;
 
-            rb.velocity =
-                Vector2.right *
-                dashHorizontalSign *
-                stats.dashSpeed;
+            SetHorizontalVelocityWithConveyor(
+                dashHorizontalSign * stats.dashSpeed);
+            rb.velocity = new Vector2(rb.velocity.x, 0f);
             dashFollowingSlope = false;
         }
 
@@ -1984,6 +4156,8 @@ namespace Game.Player
             return
                 isGrounded &&
                 currentGroundPlatform == null &&
+                currentGroundConveyor == null &&
+                currentGroundWoodWorkpiece == null &&
                 IsValidDashSlopeNormal(normal);
         }
 
@@ -2019,6 +4193,8 @@ namespace Game.Player
                 if (candidate.collider == null) continue;
                 if (candidate.collider.isTrigger) continue;
                 if (candidate.collider.GetComponentInParent<HorizontalMovingPlatform>() != null) continue;
+                if (candidate.collider.GetComponentInParent<ConveyorBelt>() != null) continue;
+                if (candidate.collider.GetComponentInParent<WoodWorkpiece>() != null) continue;
                 if (!IsValidDashSlopeNormal(candidate.normal)) continue;
                 if (candidate.distance >= closestDistance) continue;
 
@@ -2297,7 +4473,9 @@ namespace Game.Player
             {
                 isGrounded = false;
                 groundNormal = Vector2.up;
+                currentGroundCollider = null;
                 currentGroundPlatform = null;
+                UpdateGroundConveyor(null, null);
                 slopeMovementSuppressedUntilAirborne = false;
                 return;
             }
@@ -2335,13 +4513,26 @@ namespace Game.Player
             }
 
             isGrounded = bestHit.collider != null;
+            if (isGrounded)
+                doubleJumpAvailable = doubleJumpEquipped;
+
             groundNormal = isGrounded ? bestHit.normal.normalized : Vector2.up;
+            currentGroundCollider = isGrounded ? bestHit.collider : null;
             if (!isGrounded)
                 slopeMovementSuppressedUntilAirborne = false;
 
             currentGroundPlatform = isGrounded
                 ? bestHit.collider.GetComponentInParent<HorizontalMovingPlatform>()
                 : null;
+            ConveyorBelt detectedConveyor = isGrounded
+                ? bestHit.collider.GetComponentInParent<ConveyorBelt>()
+                : null;
+            WoodWorkpiece detectedWoodWorkpiece = isGrounded
+                ? bestHit.collider.GetComponentInParent<WoodWorkpiece>()
+                : null;
+            if (detectedWoodWorkpiece != null)
+                detectedConveyor = null;
+            UpdateGroundConveyor(detectedConveyor, detectedWoodWorkpiece);
 
             if (logLedgeDebug && bestHit.collider != lastGroundDebugCollider)
             {
@@ -2357,7 +4548,85 @@ namespace Game.Player
                 groundNormal.y >= groundNormalMinY &&
                 groundNormal.y < SlopeNormalMaxY &&
                 !slopeMovementSuppressedUntilAirborne &&
-                currentGroundPlatform == null;
+                currentGroundPlatform == null &&
+                currentGroundConveyor == null &&
+                currentGroundWoodWorkpiece == null;
+        }
+
+        private void UpdateGroundConveyor(
+            ConveyorBelt detectedConveyor,
+            WoodWorkpiece detectedWoodWorkpiece)
+        {
+            if (!isGrounded)
+            {
+                currentGroundConveyor = null;
+                currentGroundWoodWorkpiece = null;
+                appliedConveyorVelocityX = 0f;
+                suppressConveyorUntilAirborne = false;
+                return;
+            }
+
+            if (suppressConveyorUntilAirborne && rb.velocity.y <= 0f)
+                suppressConveyorUntilAirborne = false;
+
+            if (suppressConveyorUntilAirborne)
+            {
+                detectedConveyor = null;
+                detectedWoodWorkpiece = null;
+            }
+
+            if (detectedConveyor != currentGroundConveyor ||
+                detectedWoodWorkpiece != currentGroundWoodWorkpiece ||
+                (detectedConveyor == null && detectedWoodWorkpiece == null))
+                appliedConveyorVelocityX = 0f;
+
+            currentGroundConveyor = detectedConveyor;
+            currentGroundWoodWorkpiece = detectedWoodWorkpiece;
+        }
+
+        private float CurrentConveyorVelocityX()
+        {
+            if (!isGrounded || suppressConveyorUntilAirborne)
+                return 0f;
+
+            if (currentGroundWoodWorkpiece != null)
+            {
+                Rigidbody2D supportBody = currentGroundWoodWorkpiece.Body;
+                return supportBody != null && supportBody.simulated
+                    ? supportBody.velocity.x
+                    : 0f;
+            }
+
+            return currentGroundConveyor != null
+                ? currentGroundConveyor.SurfaceVelocity.x
+                : 0f;
+        }
+
+        private float HorizontalVelocityWithoutConveyor()
+        {
+            return rb.velocity.x - appliedConveyorVelocityX;
+        }
+
+        private void SetHorizontalVelocityWithConveyor(float controlledVelocityX)
+        {
+            float surfaceVelocityX = CurrentConveyorVelocityX();
+            rb.velocity = new Vector2(controlledVelocityX + surfaceVelocityX, rb.velocity.y);
+            appliedConveyorVelocityX = surfaceVelocityX;
+        }
+
+        private void DetachConveyorForTakeoff()
+        {
+            float supportVelocityX = CurrentConveyorVelocityX();
+            bool hadSupportVelocity =
+                Mathf.Abs(supportVelocityX) > 0.0001f ||
+                Mathf.Abs(appliedConveyorVelocityX) > 0.0001f;
+            float carriedVelocityX =
+                HorizontalVelocityWithoutConveyor() + supportVelocityX;
+            rb.velocity = new Vector2(carriedVelocityX, rb.velocity.y);
+            appliedConveyorVelocityX = 0f;
+            currentGroundConveyor = null;
+            currentGroundWoodWorkpiece = null;
+            suppressConveyorUntilAirborne = hadSupportVelocity;
         }
 
         private void ApplyMovingPlatformDelta()
@@ -2560,7 +4829,7 @@ namespace Game.Player
                 return;
             }
 
-            if (isGrounded || isHanging || isSwinging || isDashing)
+            if (isGrounded || isHanging || IsSwinging || isDashing)
             {
                 cornerStuckTimer = 0f;
                 return;
@@ -3070,6 +5339,7 @@ namespace Game.Player
 
         private void EnterHang(Vector2 lockedPos, Vector2 corner, bool hasClimbPosition, Vector2 climbPosition, LedgeGrabPoint sourcePoint)
         {
+            CancelSprintCrouchDecision("PlayerController.EnterHang", true);
             ClearSprintMomentum();
             isHanging = true;
             isWallSliding = false;

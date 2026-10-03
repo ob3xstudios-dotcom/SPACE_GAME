@@ -13,6 +13,7 @@ namespace Game.Player
         [SerializeField] private string groundedParam = "Grounded";
         [SerializeField] private string vyParam = "Vy";
         [SerializeField] private string hangingParam = "Hanging";
+        [SerializeField] private string swingingParam = "Swinging";
         [SerializeField] private string wallSlidingParam = "WallSliding";
         [SerializeField] private string wallSlideEdgeParam = "WallSlideEdge";
         [SerializeField] private string wallSideParam = "WallSide";
@@ -43,6 +44,10 @@ namespace Game.Player
         [SerializeField] private string crouchBool = "Crouch";
         [SerializeField] private string layDownBool = "LayDown";
 
+        [Header("Sprint Slide / Forward Dive Params")]
+        [SerializeField] private string slidingBool = "Sliding";
+        [SerializeField] private string divingBool = "Diving";
+
         [Header("Tuning")]
         [SerializeField, Range(0f, 1f)] private float movingThreshold = 0.05f;
         [SerializeField, Range(0.1f, 1f)] private float minRunAnimSpeed = 0.35f;
@@ -53,15 +58,16 @@ namespace Game.Player
         private PlayerController controller;
         private Rigidbody2D rb;
 
-        private int speedHash, runAnimSpeedHash, groundedHash, vyHash, hangingHash;
+        private int speedHash, runAnimSpeedHash, groundedHash, vyHash, hangingHash, swingingHash;
         private int wallSlidingHash, wallSlideEdgeHash, wallSideHash;
         private int jumpStartHash, jumpEndHash, wallImpactHash, wallJumpStartHash;
         private int attackTrigHash, attackDirHash;
         private int parryTrigHash;
-        private int crouchHash, layDownHash;
+        private int crouchHash, layDownHash, slidingHash, divingHash;
         private bool hasWallSlidingParam, hasWallSlideEdgeParam, hasWallSideParam, hasJumpStartParam, hasJumpEndParam;
         private bool hasWallImpactParam, hasWallJumpStartParam;
         private bool hasGroundedSample, wasGrounded, wasTouchingWall, wasWallSliding;
+        private bool wasDiving;
         private bool wallSlideEdgeLatched;
         private float jumpEndVisualLockTimer;
 
@@ -78,6 +84,7 @@ namespace Game.Player
             groundedHash = Animator.StringToHash(groundedParam);
             vyHash = Animator.StringToHash(vyParam);
             hangingHash = Animator.StringToHash(hangingParam);
+            swingingHash = Animator.StringToHash(swingingParam);
             wallSlidingHash = Animator.StringToHash(wallSlidingParam);
             wallSlideEdgeHash = Animator.StringToHash(wallSlideEdgeParam);
             wallSideHash = Animator.StringToHash(wallSideParam);
@@ -93,6 +100,8 @@ namespace Game.Player
 
             crouchHash = Animator.StringToHash(crouchBool);
             layDownHash = Animator.StringToHash(layDownBool);
+            slidingHash = Animator.StringToHash(slidingBool);
+            divingHash = Animator.StringToHash(divingBool);
 
             hasWallSlidingParam = HasAnimatorParameter(wallSlidingHash, AnimatorControllerParameterType.Bool);
             hasWallSlideEdgeParam = HasAnimatorParameter(wallSlideEdgeHash, AnimatorControllerParameterType.Bool);
@@ -127,11 +136,20 @@ namespace Game.Player
             bool isTouchingWall = !isGrounded && controller != null && controller.IsTouchingWall;
             bool isWallSliding = !isGrounded && controller != null && controller.IsWallSliding;
             bool isPushingIntoWall = !isGrounded && controller != null && controller.IsPushingIntoWall;
+            bool isSwinging = controller != null && controller.IsSwinging;
+            bool isSliding = controller != null && controller.IsSliding;
+            bool isDiving = controller != null && controller.IsDiving;
             anim.SetBool(groundedHash, isGrounded);
             anim.SetBool(hangingHash, controller != null && controller.IsHanging);
-            if (hasGroundedSample && !wasGrounded && isGrounded && (controller == null || !controller.IsNormalJumpAnticipating))
+            anim.SetBool(swingingHash, isSwinging);
+            anim.SetBool(slidingHash, isSliding);
+            anim.SetBool(divingHash, isDiving);
+            if (hasGroundedSample && !wasGrounded && isGrounded &&
+                !isDiving && !wasDiving &&
+                (controller == null || !controller.IsNormalJumpAnticipating))
                 TriggerJumpEnd();
             wasGrounded = isGrounded;
+            wasDiving = isDiving;
             hasGroundedSample = true;
 
             if (hasWallSlidingParam)
@@ -149,7 +167,12 @@ namespace Game.Player
             }
             if (hasWallSideParam)
                 anim.SetInteger(wallSideHash, !isGrounded && controller != null ? controller.WallSide : 0);
-            UpdateWallAnimations(isGrounded, isTouchingWall, isWallSliding, isPushingIntoWall);
+            UpdateWallAnimations(
+                isGrounded,
+                isTouchingWall,
+                isWallSliding,
+                isPushingIntoWall,
+                isSwinging || isSliding || isDiving);
 
             // Crouch/LayDown desde InputReader (si existe)
             var input = controller != null ? controller.input : null;
@@ -184,8 +207,20 @@ namespace Game.Player
             return false;
         }
 
-        private void UpdateWallAnimations(bool isGrounded, bool isTouchingWall, bool isWallSliding, bool isPushingIntoWall)
+        private void UpdateWallAnimations(
+            bool isGrounded,
+            bool isTouchingWall,
+            bool isWallSliding,
+            bool isPushingIntoWall,
+            bool isSwinging)
         {
+            if (isSwinging)
+            {
+                wasTouchingWall = false;
+                wasWallSliding = false;
+                return;
+            }
+
             if (jumpEndVisualLockTimer > 0f)
                 return;
 

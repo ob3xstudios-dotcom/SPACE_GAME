@@ -62,6 +62,10 @@ namespace Game.Player
 
         public bool IsInvulnerable => invulnerable;
         public bool ExternalDeathHandling => externalDeathHandling;
+        public int MaxHealth =>
+            playerResources != null && playerResources.Health != null
+                ? playerResources.Health.Max
+                : 0;
 
         private void Awake()
         {
