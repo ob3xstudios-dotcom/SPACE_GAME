@@ -117,8 +117,8 @@ MonoBehaviour:
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: a2cdee294b20439386e99629a1c96b2b, type: 3}
-  m_Name:
-  m_EditorClassIdentifier:
+  m_Name: 
+  m_EditorClassIdentifier: 
   body: {fileID: 920000000000000003}
   solidCollider: {fileID: 920000000000000004}
   openWhenActive: 1
@@ -169,8 +169,8 @@ MonoBehaviour:
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: 55bfab11bc564d05b8f554c7cfe73745, type: 3}
-  m_Name:
-  m_EditorClassIdentifier:
+  m_Name: 
+  m_EditorClassIdentifier: 
   sourceCollider: {fileID: 920000000000000004}
   sortingLayerName: Default
   sortingOrder: 0
