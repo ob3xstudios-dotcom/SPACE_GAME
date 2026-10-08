@@ -1,5 +1,7 @@
 using Cinemachine;
+using Game.Currency;
 using Game.Player;
+using Game.Progress;
 using UnityEngine;
 using UnityEngine.SceneManagement;
 
@@ -20,6 +22,7 @@ namespace Game.Systems
         [SerializeField] private bool debugLogs = false;
 
         private bool reloading;
+        private bool fallInProgress;
         private PlayerController playerController;
         private Rigidbody2D playerRb;
 
@@ -35,7 +38,18 @@ namespace Game.Systems
             ResolveRefs();
             if (player == null) return;
             if (reloading) return;
+
+            if (fallInProgress)
+            {
+                if (player.position.y >= fallY)
+                    fallInProgress = false;
+                return;
+            }
+
             if (player.position.y >= fallY) return;
+
+            fallInProgress = true;
+            CurrencyService.Instance.HandleFatalFall(player);
 
             if (TryRespawnWithGameManager())
                 return;
@@ -63,6 +77,7 @@ namespace Game.Systems
         private void ReloadActiveScene()
         {
             reloading = true;
+            GameProgressService.Instance.DiscardPendingExploration();
             if (debugLogs)
                 Debug.Log($"[RESPAWN TRACE] SceneFallRespawn.Reload begin t={Time.time:0.000} unscaled={Time.unscaledTime:0.000}");
             HitStopManager.CancelAll();

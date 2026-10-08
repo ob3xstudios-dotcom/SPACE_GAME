@@ -11,6 +11,7 @@ namespace Game.Progress
         public int saveVersion = CurrentSaveVersion;
         public bool mapOwned;
         public List<string> confirmedExploredRegionIds = new List<string>();
+        public List<string> confirmedMapCellIds = new List<string>();
         public string lastRestBenchId = string.Empty;
         public string lastRestScene = string.Empty;
 
@@ -21,20 +22,28 @@ namespace Game.Progress
 
             if (confirmedExploredRegionIds == null)
                 confirmedExploredRegionIds = new List<string>();
+            if (confirmedMapCellIds == null)
+                confirmedMapCellIds = new List<string>();
 
-            HashSet<string> uniqueIds = new HashSet<string>(StringComparer.Ordinal);
-            for (int i = confirmedExploredRegionIds.Count - 1; i >= 0; i--)
-            {
-                string normalizedId = NormalizeId(confirmedExploredRegionIds[i]);
-                if (string.IsNullOrEmpty(normalizedId) || !uniqueIds.Add(normalizedId))
-                    confirmedExploredRegionIds.RemoveAt(i);
-                else
-                    confirmedExploredRegionIds[i] = normalizedId;
-            }
-
-            confirmedExploredRegionIds.Sort(StringComparer.Ordinal);
+            NormalizeIds(confirmedExploredRegionIds);
+            NormalizeIds(confirmedMapCellIds);
             lastRestBenchId = NormalizeId(lastRestBenchId);
             lastRestScene = lastRestScene != null ? lastRestScene.Trim() : string.Empty;
+        }
+
+        private static void NormalizeIds(List<string> ids)
+        {
+            HashSet<string> uniqueIds = new HashSet<string>(StringComparer.Ordinal);
+            for (int i = ids.Count - 1; i >= 0; i--)
+            {
+                string normalizedId = NormalizeId(ids[i]);
+                if (string.IsNullOrEmpty(normalizedId) || !uniqueIds.Add(normalizedId))
+                    ids.RemoveAt(i);
+                else
+                    ids[i] = normalizedId;
+            }
+
+            ids.Sort(StringComparer.Ordinal);
         }
 
         public static string NormalizeId(string value)

@@ -1,5 +1,6 @@
 using System.Collections;
 using Game.Player;
+using Game.Progress;
 using UnityEngine;
 
 namespace Game.Systems
@@ -77,6 +78,8 @@ namespace Game.Systems
         public bool RespawnPlayerAtCheckpoint()
         {
             if (respawning) return true;
+
+            GameProgressService.Instance.DiscardPendingExploration();
 
             if (respawnRoutine != null)
                 StopCoroutine(respawnRoutine);

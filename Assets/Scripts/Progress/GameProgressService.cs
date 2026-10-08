@@ -20,6 +20,8 @@ namespace Game.Progress
 
         private readonly HashSet<string> confirmedRegionIds = new HashSet<string>(StringComparer.Ordinal);
         private readonly HashSet<string> pendingRegionIds = new HashSet<string>(StringComparer.Ordinal);
+        private readonly HashSet<string> confirmedMapCellIds = new HashSet<string>(StringComparer.Ordinal);
+        private readonly HashSet<string> pendingMapCellIds = new HashSet<string>(StringComparer.Ordinal);
         private GameProgressData data;
         private bool usesTemporaryProgress;
 
@@ -39,12 +41,17 @@ namespace Game.Progress
         public string LastRestBenchId => data != null ? data.lastRestBenchId : string.Empty;
         public string LastRestScene => data != null ? data.lastRestScene : string.Empty;
         public int PendingRegionCount => pendingRegionIds.Count;
+        public int PendingMapCellCount => pendingMapCellIds.Count;
+        public IReadOnlyCollection<string> PendingMapCellIds => pendingMapCellIds;
+        public IReadOnlyCollection<string> ConfirmedMapCellIds => confirmedMapCellIds;
         public bool LogMapDiagnostics => logMapDiagnostics;
         public bool UsesTemporaryProgress => usesTemporaryProgress;
 
         public event Action<bool> OnMapOwnershipChanged;
         public event Action<string> OnRegionPending;
         public event Action<string> OnRegionConfirmed;
+        public event Action<string> OnMapCellPending;
+        public event Action<string> OnMapCellConfirmed;
         public event Action OnProgressLoaded;
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
@@ -111,9 +118,42 @@ namespace Game.Progress
             return true;
         }
 
+        public bool IsMapCellConfirmed(string cellId)
+        {
+            string normalizedId = GameProgressData.NormalizeId(cellId);
+            return !string.IsNullOrEmpty(normalizedId) && confirmedMapCellIds.Contains(normalizedId);
+        }
+
+        public bool IsMapCellPending(string cellId)
+        {
+            string normalizedId = GameProgressData.NormalizeId(cellId);
+            return !string.IsNullOrEmpty(normalizedId) && pendingMapCellIds.Contains(normalizedId);
+        }
+
+        public bool MarkMapCellExploredPending(string cellId)
+        {
+            string normalizedId = GameProgressData.NormalizeId(cellId);
+            if (string.IsNullOrEmpty(normalizedId) || confirmedMapCellIds.Contains(normalizedId))
+                return false;
+
+            if (!pendingMapCellIds.Add(normalizedId))
+                return false;
+
+            LogMapDiagnostic(
+                $"[PENDING CELL] cell='{normalizedId}' pendingCellCount={pendingMapCellIds.Count}");
+            OnMapCellPending?.Invoke(normalizedId);
+            return true;
+        }
+
         public void DiscardPendingExploration()
         {
+            int discardedRegionCount = pendingRegionIds.Count;
+            int discardedCellCount = pendingMapCellIds.Count;
             pendingRegionIds.Clear();
+            pendingMapCellIds.Clear();
+            LogMapDiagnostic(
+                $"[MAP][DISCARD] pendingRegions={discardedRegionCount} " +
+                $"pendingCells={discardedCellCount}");
         }
 
         public bool GrantMap(bool saveImmediately = true)
@@ -136,27 +176,32 @@ namespace Game.Progress
             EnsureData();
 
             string normalizedBenchId = GameProgressData.NormalizeId(benchId);
+            string normalizedSceneName = sceneName != null ? sceneName.Trim() : string.Empty;
+            LogMapDiagnostic(
+                $"[MAP][3 REST] bench='{normalizedBenchId}' scene='{normalizedSceneName}' " +
+                $"pendingRegionsBeforeConfirm={pendingRegionIds.Count} " +
+                $"pendingCellsBeforeConfirm={pendingMapCellIds.Count}");
+            ConfirmPendingExploration();
+
             if (!string.IsNullOrEmpty(normalizedBenchId))
                 data.lastRestBenchId = normalizedBenchId;
             else
                 Debug.LogWarning("[PROGRESS] RestBench has no stable benchId. Exploration will save, but this bench cannot become a persistent respawn identity.");
 
-            data.lastRestScene = sceneName != null ? sceneName.Trim() : string.Empty;
-            LogMapDiagnostic(
-                $"[MAP][3 REST] bench='{normalizedBenchId}' scene='{data.lastRestScene}' " +
-                $"pendingBeforeConfirm={pendingRegionIds.Count}");
-            ConfirmPendingExploration();
+            data.lastRestScene = normalizedSceneName;
             bool saved = SaveProgress();
             LogMapDiagnostic(
-                $"[MAP][SAVE] success={saved} confirmedCount={confirmedRegionIds.Count} " +
-                $"pendingCount={pendingRegionIds.Count}");
+                $"[MAP][SAVE] success={saved} confirmedRegions={confirmedRegionIds.Count} " +
+                $"pendingRegions={pendingRegionIds.Count} " +
+                $"confirmedCells={confirmedMapCellIds.Count} " +
+                $"pendingCells={pendingMapCellIds.Count}");
             return saved;
         }
 
         public bool SaveProgress()
         {
             EnsureData();
-            SyncConfirmedRegionsToData();
+            SyncConfirmedExplorationToData();
 
             if (usesTemporaryProgress)
             {
@@ -193,16 +238,20 @@ namespace Game.Progress
             data = GameSaveSystem.LoadOrCreate();
             pendingRegionIds.Clear();
             confirmedRegionIds.Clear();
+            pendingMapCellIds.Clear();
+            confirmedMapCellIds.Clear();
 
             for (int i = 0; i < data.confirmedExploredRegionIds.Count; i++)
                 confirmedRegionIds.Add(data.confirmedExploredRegionIds[i]);
+            for (int i = 0; i < data.confirmedMapCellIds.Count; i++)
+                confirmedMapCellIds.Add(data.confirmedMapCellIds[i]);
 
             OnProgressLoaded?.Invoke();
         }
 
         private void ConfirmPendingExploration()
         {
-            if (pendingRegionIds.Count == 0)
+            if (pendingRegionIds.Count == 0 && pendingMapCellIds.Count == 0)
                 return;
 
             foreach (string regionId in pendingRegionIds)
@@ -216,15 +265,34 @@ namespace Game.Progress
             }
 
             pendingRegionIds.Clear();
+
+            foreach (string cellId in pendingMapCellIds)
+            {
+                if (confirmedMapCellIds.Add(cellId))
+                {
+                    LogMapDiagnostic(
+                        $"[CONFIRMED CELL] cell='{cellId}' " +
+                        $"confirmedCellCount={confirmedMapCellIds.Count}");
+                    OnMapCellConfirmed?.Invoke(cellId);
+                }
+            }
+
+            pendingMapCellIds.Clear();
         }
 
-        private void SyncConfirmedRegionsToData()
+        private void SyncConfirmedExplorationToData()
         {
             data.confirmedExploredRegionIds.Clear();
             foreach (string regionId in confirmedRegionIds)
                 data.confirmedExploredRegionIds.Add(regionId);
 
             data.confirmedExploredRegionIds.Sort(StringComparer.Ordinal);
+
+            data.confirmedMapCellIds.Clear();
+            foreach (string cellId in confirmedMapCellIds)
+                data.confirmedMapCellIds.Add(cellId);
+
+            data.confirmedMapCellIds.Sort(StringComparer.Ordinal);
             data.saveVersion = GameProgressData.CurrentSaveVersion;
         }
 
@@ -239,8 +307,10 @@ namespace Game.Progress
         {
             Debug.Log(
                 $"[MAP][SNAPSHOT] temporarySession={usesTemporaryProgress} mapOwned={MapOwned} " +
-                $"pending=[{FormatRegionIds(pendingRegionIds)}] " +
-                $"confirmed=[{FormatRegionIds(confirmedRegionIds)}] " +
+                $"legacyPending=[{FormatIds(pendingRegionIds)}] " +
+                $"legacyConfirmed=[{FormatIds(confirmedRegionIds)}] " +
+                $"pendingCells=[{FormatIds(pendingMapCellIds)}] " +
+                $"confirmedCells=[{FormatIds(confirmedMapCellIds)}] " +
                 $"lastBench='{LastRestBenchId}' lastScene='{LastRestScene}'",
                 this);
         }
@@ -256,6 +326,8 @@ namespace Game.Progress
 
             pendingRegionIds.Clear();
             confirmedRegionIds.Clear();
+            pendingMapCellIds.Clear();
+            confirmedMapCellIds.Clear();
 
             Debug.Log(
                 "[MAP][TEST MODE] Fresh in-memory exploration active. " +
@@ -313,12 +385,12 @@ namespace Game.Progress
                 Debug.Log(message, this);
         }
 
-        private static string FormatRegionIds(HashSet<string> regionIds)
+        private static string FormatIds(HashSet<string> ids)
         {
-            if (regionIds == null || regionIds.Count == 0)
+            if (ids == null || ids.Count == 0)
                 return "<none>";
 
-            List<string> sortedIds = new List<string>(regionIds);
+            List<string> sortedIds = new List<string>(ids);
             sortedIds.Sort(StringComparer.Ordinal);
             return string.Join(", ", sortedIds);
         }

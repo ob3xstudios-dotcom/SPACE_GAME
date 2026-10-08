@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using Game.Input;
 using Game.Player;
 using Game.Progress;
@@ -13,6 +14,9 @@ namespace Game.Map
         [SerializeField] private GameObject mapRoot;
         [SerializeField] private MapRegionView[] regionViews;
 
+        private MapCellView[] cellViews;
+        private MapAreaView[] areaViews;
+
         [Header("Player (optional; resolved once if empty)")]
         [SerializeField] private PlayerController playerController;
         [SerializeField] private InputReader inputReader;
@@ -27,6 +31,8 @@ namespace Game.Map
         {
             if (regionViews == null || regionViews.Length == 0)
                 regionViews = GetComponentsInChildren<MapRegionView>(true);
+            CacheGranularViews();
+            WarnAboutDuplicateCellIds();
 
             ResolvePlayerReferences();
 
@@ -39,6 +45,7 @@ namespace Game.Map
             progress = GameProgressService.Instance;
             progress.OnMapOwnershipChanged += HandleMapOwnershipChanged;
             progress.OnRegionConfirmed += HandleRegionConfirmed;
+            progress.OnMapCellConfirmed += HandleMapCellConfirmed;
             progress.OnProgressLoaded += HandleProgressLoaded;
             SubscribeToHealth();
             RefreshViews();
@@ -53,6 +60,7 @@ namespace Game.Map
             {
                 progress.OnMapOwnershipChanged -= HandleMapOwnershipChanged;
                 progress.OnRegionConfirmed -= HandleRegionConfirmed;
+                progress.OnMapCellConfirmed -= HandleMapCellConfirmed;
                 progress.OnProgressLoaded -= HandleProgressLoaded;
             }
         }
@@ -165,13 +173,59 @@ namespace Game.Map
 
         private void RefreshViews()
         {
-            if (regionViews == null)
+            if (regionViews != null)
+            {
+                for (int i = 0; i < regionViews.Length; i++)
+                {
+                    if (regionViews[i] != null)
+                        regionViews[i].Refresh(progress);
+                }
+            }
+
+            if (cellViews != null)
+            {
+                for (int i = 0; i < cellViews.Length; i++)
+                {
+                    if (cellViews[i] != null)
+                        cellViews[i].Refresh(progress);
+                }
+            }
+
+            if (areaViews != null)
+            {
+                for (int i = 0; i < areaViews.Length; i++)
+                {
+                    if (areaViews[i] != null)
+                        areaViews[i].Refresh(progress);
+                }
+            }
+        }
+
+        private void CacheGranularViews()
+        {
+            cellViews = GetComponentsInChildren<MapCellView>(true);
+            areaViews = GetComponentsInChildren<MapAreaView>(true);
+        }
+
+        private void WarnAboutDuplicateCellIds()
+        {
+            if (cellViews == null || cellViews.Length == 0)
                 return;
 
-            for (int i = 0; i < regionViews.Length; i++)
+            HashSet<string> uniqueIds = new HashSet<string>(System.StringComparer.Ordinal);
+            for (int i = 0; i < cellViews.Length; i++)
             {
-                if (regionViews[i] != null)
-                    regionViews[i].Refresh(progress);
+                MapCellView cellView = cellViews[i];
+                if (cellView == null)
+                    continue;
+
+                string normalizedId = GameProgressData.NormalizeId(cellView.CellId);
+                if (string.IsNullOrEmpty(normalizedId) || uniqueIds.Add(normalizedId))
+                    continue;
+
+                Debug.LogWarning(
+                    $"[MAP CELL] Duplicate MapCellView cellId='{normalizedId}' under '{name}'.",
+                    cellView);
             }
         }
 
@@ -245,6 +299,14 @@ namespace Game.Map
             RefreshViews();
         }
 
+        private void HandleMapCellConfirmed(string cellId)
+        {
+            if (progress != null && progress.LogMapDiagnostics)
+                Debug.Log($"[MAP CELL][MAP EVENT] confirmed cell='{cellId}'", this);
+
+            RefreshViews();
+        }
+
         private void HandleProgressLoaded()
         {
             if (progress == null || !progress.MapOwned)
@@ -252,5 +314,13 @@ namespace Game.Map
 
             RefreshViews();
         }
+
+#if UNITY_EDITOR
+        private void OnValidate()
+        {
+            CacheGranularViews();
+            WarnAboutDuplicateCellIds();
+        }
+#endif
     }
 }
