@@ -1,6 +1,5 @@
 using System.Collections.Generic;
 using Game.Input;
-using Game.Progression;
 using Game.World.Traversal;
 using UnityEngine;
 
@@ -12,7 +11,7 @@ namespace Game.Player
     public sealed class PlayerUpdraftCape : MonoBehaviour
     {
         private const float StrengthComparisonEpsilon = 0.0001f;
-        private const float TopContainmentSafetyMargin = 0.02f;
+        private const float EndContainmentSafetyMargin = 0.02f;
 
         [Header("Provisional Visual")]
         [SerializeField] private bool createPlaceholderVisual = true;
@@ -33,13 +32,11 @@ namespace Game.Player
         private PlayerController controller;
         private InputReader input;
         private PlayerHealth health;
-        private ProgressionService progression;
         private Rigidbody2D body;
         private Collider2D mainCollider;
         private GameObject capeVisual;
         private SpriteRenderer capeRenderer;
         private Sprite placeholderSprite;
-        private bool equipped;
         private bool deployed;
         private bool playerAlive = true;
         private bool subscribed;
@@ -47,7 +44,14 @@ namespace Game.Player
         private bool hovering;
         private UpdraftZone activeZone;
         private UpdraftZone liftZone;
+        private UpdraftZone lastUpPassZone;
+        private float lastUpPassVelocityBeforeEnd;
+        private bool hasUpPassVelocitySample;
         private string lastMotionBlockReason;
+        private Vector2 postFlowTraceDirection;
+        private string postFlowTraceReason;
+        private int postFlowTraceFixedStep;
+        private int postFlowTraceFixedStepsRemaining;
 
         private bool DiagnosticsEnabled
         {
@@ -74,7 +78,7 @@ namespace Game.Player
         private void OnEnable()
         {
             Subscribe();
-            RefreshEquippedState();
+            UpdateVisual();
         }
 
         private void OnDisable()
@@ -92,11 +96,11 @@ namespace Game.Player
                 Destroy(placeholderSprite);
         }
 
-        internal void Bind(PlayerController playerController, ProgressionService progressionService)
+        internal void Bind(PlayerController playerController)
         {
             Unsubscribe();
+            SetHorizontalAirCurrentInfluence(null, false);
             controller = playerController;
-            progression = progressionService;
             body = GetComponent<Rigidbody2D>();
             input = GetComponent<InputReader>();
             health = GetComponent<PlayerHealth>();
@@ -104,30 +108,32 @@ namespace Game.Player
             playerAlive = true;
             CreatePlaceholderVisual();
             Subscribe();
-            RefreshEquippedState();
+            UpdateVisual();
             LogBindState();
         }
 
         private void Update()
         {
-            SetDeployed(equipped && playerAlive && input != null && input.CapeHeld);
+            SetDeployed(playerAlive && input != null && input.CapeHeld);
             UpdateVisual();
         }
 
         private void FixedUpdate()
         {
+            LogPostFlowTrace();
+
             string basicBlockReason = GetBasicMotionBlockReason();
             if (basicBlockReason != null)
             {
                 SetMotionBlockReason(basicBlockReason);
-                StopLift(basicBlockReason);
+                StopLift(basicBlockReason, basicBlockReason == "released");
                 return;
             }
 
-            if (!TryGetEffectiveZone(body.velocity.y, out UpdraftZone zone))
+            if (!TryGetEffectiveZone(body.velocity, out UpdraftZone zone))
             {
                 SetMotionBlockReason("no-zone");
-                StopLift("no-zone");
+                StopLift("no-zone", true);
                 SetActiveZone(null);
                 return;
             }
@@ -143,110 +149,213 @@ namespace Game.Player
 
             SetMotionBlockReason(null);
             StartLift(zone);
-            ApplyVerticalMotion(zone);
+            SetHorizontalAirCurrentInfluence(zone, false);
+            ApplyFlowMotion(zone);
         }
 
-        private void ApplyVerticalMotion(UpdraftZone zone)
+        private void ApplyFlowMotion(UpdraftZone zone)
         {
-            float currentVerticalSpeed = body.velocity.y;
+            Vector2 direction = zone.FlowDirection;
+            float currentFlowSpeed = Vector2.Dot(body.velocity, direction);
             float fixedDeltaTime = Time.fixedDeltaTime;
-            if (mainCollider == null || !mainCollider.enabled ||
-                !zone.TryGetTopHoverY(out float hoverY, out float topBoundaryY))
+            if (zone.EndBehavior == AirCurrentEndBehavior.PassThrough)
             {
                 hovering = false;
-                ApplyNormalLift(zone, currentVerticalSpeed, fixedDeltaTime);
+                ApplyFlowAcceleration(zone, direction, currentFlowSpeed, fixedDeltaTime);
                 return;
             }
 
-            // Control the Player collider's upper edge instead of the transform pivot.
+            ApplyHoldInsideFlow(
+                zone,
+                direction,
+                currentFlowSpeed,
+                fixedDeltaTime);
+        }
+
+        private void ApplyHoldInsideFlow(
+            UpdraftZone zone,
+            Vector2 direction,
+            float currentFlowSpeed,
+            float fixedDeltaTime)
+        {
+            if (mainCollider == null || !mainCollider.enabled ||
+                !zone.TryGetEndHoldCoordinates(
+                    out float holdCoordinate,
+                    out float boundaryCoordinate))
+            {
+                hovering = false;
+                ApplyFlowAcceleration(zone, direction, currentFlowSpeed, fixedDeltaTime);
+                return;
+            }
+
+            // Control the Player collider's leading edge instead of the transform pivot.
             // This leaves the configured inset physically inside the trigger volume.
-            float positionError = hoverY - mainCollider.bounds.max.y;
+            float playerLeadingEdge = UpdraftZone.GetLeadingEdgeCoordinate(
+                mainCollider.bounds,
+                direction);
+            float positionError = holdCoordinate - playerLeadingEdge;
             float tolerance = zone.HoverTolerance;
             if (positionError > tolerance)
             {
                 hovering = false;
-                float safeRiseSpeed = Mathf.Sqrt(
+                float safeFlowSpeed = Mathf.Sqrt(
                     2f * zone.HoverStrength * (positionError - tolerance));
-                if (safeRiseSpeed >= zone.MaxRiseSpeed)
+                if (safeFlowSpeed >= zone.MaxFlowSpeed)
                 {
-                    ApplyNormalLift(zone, currentVerticalSpeed, fixedDeltaTime);
+                    ApplyFlowAcceleration(zone, direction, currentFlowSpeed, fixedDeltaTime);
                     return;
                 }
 
-                float targetVerticalSpeed = Mathf.Min(zone.MaxRiseSpeed, safeRiseSpeed);
-                SetHoverControlledVelocity(
+                float targetFlowSpeed = Mathf.Min(zone.MaxFlowSpeed, safeFlowSpeed);
+                SetEndControlledVelocity(
                     zone,
-                    currentVerticalSpeed,
-                    targetVerticalSpeed,
-                    topBoundaryY - mainCollider.bounds.max.y,
+                    direction,
+                    currentFlowSpeed,
+                    targetFlowSpeed,
+                    boundaryCoordinate - playerLeadingEdge,
                     fixedDeltaTime);
                 return;
             }
 
             StartHover();
-            float hoverTargetSpeed = 0f;
+            float holdTargetSpeed = 0f;
             if (positionError < -tolerance)
             {
                 float correctionDistance = -positionError - tolerance;
-                hoverTargetSpeed = -Mathf.Min(
+                holdTargetSpeed = -Mathf.Min(
                     zone.HoverCorrectionSpeed,
                     correctionDistance * Mathf.Sqrt(zone.HoverStrength));
             }
 
-            SetHoverControlledVelocity(
+            SetEndControlledVelocity(
                 zone,
-                currentVerticalSpeed,
-                hoverTargetSpeed,
-                topBoundaryY - mainCollider.bounds.max.y,
+                direction,
+                currentFlowSpeed,
+                holdTargetSpeed,
+                boundaryCoordinate - playerLeadingEdge,
                 fixedDeltaTime);
         }
 
-        private void ApplyNormalLift(
+        private void ApplyFlowAcceleration(
             UpdraftZone zone,
-            float currentVerticalSpeed,
+            Vector2 direction,
+            float currentFlowSpeed,
             float fixedDeltaTime)
         {
-            float nextVerticalSpeed = zone.GetProjectedVerticalSpeed(
-                currentVerticalSpeed,
-                fixedDeltaTime);
-            if (nextVerticalSpeed > currentVerticalSpeed)
+            GetFlowMultipliers(
+                zone,
+                direction,
+                out float accelerationMultiplier,
+                out float maxSpeedMultiplier);
+            float nextFlowSpeed = zone.GetProjectedFlowSpeed(
+                currentFlowSpeed,
+                fixedDeltaTime,
+                accelerationMultiplier,
+                maxSpeedMultiplier);
+            if (!Mathf.Approximately(nextFlowSpeed, currentFlowSpeed))
             {
+                if (zone.Direction == AirCurrentDirection.Up &&
+                    zone.EndBehavior == AirCurrentEndBehavior.PassThrough &&
+                    nextFlowSpeed > currentFlowSpeed)
+                {
+                    controller?.ProtectUpwardAirCurrentMomentum();
+                }
+
                 // Unity applies gravity after FixedUpdate. Compensate only that pending
-                // gravity step so Lift Acceleration remains the net approach rate.
-                float gravityDelta = Physics2D.gravity.y * body.gravityScale * fixedDeltaTime;
-                float speedBeforeGravity = nextVerticalSpeed - gravityDelta;
-                body.velocity = new Vector2(body.velocity.x, speedBeforeGravity);
+                // gravity step for Up so Flow Acceleration keeps the validated net rate.
+                // Horizontal currents deliberately preserve normal vertical gravity.
+                float gravityDelta = GetPendingGravityDelta(zone, fixedDeltaTime);
+                SetFlowVelocity(direction, nextFlowSpeed - gravityDelta);
             }
+
+            RecordUpPassVelocitySample(
+                zone,
+                currentFlowSpeed,
+                nextFlowSpeed,
+                fixedDeltaTime);
         }
 
-        private void SetHoverControlledVelocity(
+        private void GetFlowMultipliers(
             UpdraftZone zone,
-            float currentVerticalSpeed,
-            float targetVerticalSpeedAfterGravity,
-            float distanceToTopBoundary,
+            Vector2 direction,
+            out float accelerationMultiplier,
+            out float maxSpeedMultiplier)
+        {
+            accelerationMultiplier = 1f;
+            maxSpeedMultiplier = 1f;
+            if (direction.x == 0f || input == null)
+                return;
+
+            float inputX = Mathf.Clamp(input.MoveInput.x, -1f, 1f);
+            if (inputX * direction.x <= 0.01f)
+                return;
+
+            accelerationMultiplier = zone.WithFlowAccelerationMultiplier;
+            maxSpeedMultiplier = zone.WithFlowMaxSpeedMultiplier;
+        }
+
+        private void RecordUpPassVelocitySample(
+            UpdraftZone zone,
+            float currentFlowSpeed,
+            float nextFlowSpeed,
             float fixedDeltaTime)
         {
-            float gravityDelta = Physics2D.gravity.y * body.gravityScale * fixedDeltaTime;
+            if (zone.Direction != AirCurrentDirection.Up ||
+                zone.EndBehavior != AirCurrentEndBehavior.PassThrough)
+            {
+                return;
+            }
+
+            lastUpPassZone = zone;
+            hasUpPassVelocitySample = true;
+            lastUpPassVelocityBeforeEnd =
+                !Mathf.Approximately(nextFlowSpeed, currentFlowSpeed)
+                    ? nextFlowSpeed
+                    : currentFlowSpeed + GetPendingGravityDelta(zone, fixedDeltaTime);
+        }
+
+        private void SetEndControlledVelocity(
+            UpdraftZone zone,
+            Vector2 direction,
+            float currentFlowSpeed,
+            float targetFlowSpeedAfterGravity,
+            float distanceToEndBoundary,
+            float fixedDeltaTime)
+        {
+            float gravityDelta = GetPendingGravityDelta(zone, fixedDeltaTime);
             float controlAcceleration = zone.HoverStrength;
-            if (currentVerticalSpeed > 0f)
+            if (currentFlowSpeed > 0f)
             {
                 float usableDistance = Mathf.Max(
                     0.01f,
-                    distanceToTopBoundary - TopContainmentSafetyMargin);
+                    distanceToEndBoundary - EndContainmentSafetyMargin);
                 float requiredStoppingAcceleration =
-                    currentVerticalSpeed * currentVerticalSpeed / (2f * usableDistance);
+                    currentFlowSpeed * currentFlowSpeed / (2f * usableDistance);
                 controlAcceleration = Mathf.Max(
                     controlAcceleration,
                     requiredStoppingAcceleration);
             }
 
-            float nextVerticalSpeedAfterGravity = Mathf.MoveTowards(
-                currentVerticalSpeed,
-                targetVerticalSpeedAfterGravity,
+            float nextFlowSpeedAfterGravity = Mathf.MoveTowards(
+                currentFlowSpeed,
+                targetFlowSpeedAfterGravity,
                 controlAcceleration * fixedDeltaTime);
-            float nextVerticalSpeedBeforeGravity =
-                nextVerticalSpeedAfterGravity - gravityDelta;
-            body.velocity = new Vector2(body.velocity.x, nextVerticalSpeedBeforeGravity);
+            SetFlowVelocity(direction, nextFlowSpeedAfterGravity - gravityDelta);
+        }
+
+        private float GetPendingGravityDelta(UpdraftZone zone, float fixedDeltaTime)
+        {
+            return zone.Direction == AirCurrentDirection.Up
+                ? Physics2D.gravity.y * body.gravityScale * fixedDeltaTime
+                : 0f;
+        }
+
+        private void SetFlowVelocity(Vector2 direction, float targetFlowSpeed)
+        {
+            Vector2 currentVelocity = body.velocity;
+            float currentFlowSpeed = Vector2.Dot(currentVelocity, direction);
+            body.velocity = currentVelocity +
+                direction * (targetFlowSpeed - currentFlowSpeed);
         }
 
         private void ResolveMainCollider()
@@ -296,13 +405,16 @@ namespace Game.Player
                 return;
 
             overlappingZones.Remove(zone);
-            if (DiagnosticsEnabled)
-                Debug.Log($"[CAPE][ZONE EXIT] zone={zone.name}", this);
+            if (liftActive && liftZone == zone)
+            {
+                LogFlowExit(zone);
+                LogUpPassExit(zone);
+            }
 
             if (activeZone == zone)
                 SetActiveZone(null);
             if (liftZone == zone)
-                StopLift("exited");
+                StopLift("exited", true);
         }
 
         private void Subscribe()
@@ -310,21 +422,17 @@ namespace Game.Player
             if (subscribed)
                 return;
 
-            if (progression != null)
-                progression.OnProgressionChanged += RefreshEquippedState;
             if (health != null)
             {
                 health.OnDied += HandlePlayerDied;
                 health.OnRespawned += HandlePlayerRespawned;
             }
 
-            subscribed = progression != null || health != null;
+            subscribed = health != null;
         }
 
         private void Unsubscribe()
         {
-            if (progression != null)
-                progression.OnProgressionChanged -= RefreshEquippedState;
             if (health != null)
             {
                 health.OnDied -= HandlePlayerDied;
@@ -332,19 +440,6 @@ namespace Game.Player
             }
 
             subscribed = false;
-        }
-
-        private void RefreshEquippedState()
-        {
-            bool nextEquipped = progression != null &&
-                progression.IsAbilityEquipped(ProgressionAbilityIds.UpdraftCape);
-            equipped = nextEquipped;
-            if (!equipped)
-            {
-                SetDeployed(false);
-                StopLift("ability-unequipped");
-            }
-            UpdateVisual();
         }
 
         private void HandlePlayerDied()
@@ -373,7 +468,7 @@ namespace Game.Player
         }
 
         private bool TryGetEffectiveZone(
-            float currentVerticalSpeed,
+            Vector2 currentVelocity,
             out UpdraftZone effectiveZone)
         {
             effectiveZone = null;
@@ -390,8 +485,8 @@ namespace Game.Player
                     continue;
                 }
 
-                float projectedSpeed = candidate.GetProjectedVerticalSpeed(
-                    currentVerticalSpeed,
+                float projectedSpeed = candidate.GetProjectedFlowSpeed(
+                    currentVelocity,
                     Time.fixedDeltaTime);
                 if (IsStronger(candidate, projectedSpeed, effectiveZone, bestProjectedSpeed))
                 {
@@ -418,17 +513,17 @@ namespace Game.Player
                 return true;
             if (candidateProjectedSpeed < currentBestProjectedSpeed - StrengthComparisonEpsilon)
                 return false;
-            if (candidate.MaxRiseSpeed > currentBest.MaxRiseSpeed + StrengthComparisonEpsilon)
+            if (candidate.MaxFlowSpeed > currentBest.MaxFlowSpeed + StrengthComparisonEpsilon)
                 return true;
-            if (candidate.MaxRiseSpeed < currentBest.MaxRiseSpeed - StrengthComparisonEpsilon)
+            if (candidate.MaxFlowSpeed < currentBest.MaxFlowSpeed - StrengthComparisonEpsilon)
                 return false;
-            if (candidate.EffectiveLiftAcceleration >
-                currentBest.EffectiveLiftAcceleration + StrengthComparisonEpsilon)
+            if (candidate.EffectiveFlowAcceleration >
+                currentBest.EffectiveFlowAcceleration + StrengthComparisonEpsilon)
             {
                 return true;
             }
-            if (candidate.EffectiveLiftAcceleration <
-                currentBest.EffectiveLiftAcceleration - StrengthComparisonEpsilon)
+            if (candidate.EffectiveFlowAcceleration <
+                currentBest.EffectiveFlowAcceleration - StrengthComparisonEpsilon)
             {
                 return false;
             }
@@ -438,8 +533,6 @@ namespace Game.Player
 
         private string GetBasicMotionBlockReason()
         {
-            if (!equipped)
-                return "not-equipped";
             if (!playerAlive)
                 return "dead";
             if (input == null)
@@ -503,7 +596,7 @@ namespace Game.Player
                 return;
 
             Debug.Log(
-                $"[CAPE][BIND] equipped={equipped} " +
+                "[CAPE][BIND] baseAbility=True " +
                 $"inputResolved={input != null} " +
                 $"controllerResolved={controller != null} " +
                 $"rigidbodyResolved={body != null} " +
@@ -546,8 +639,8 @@ namespace Game.Player
                 return;
 
             lastMotionBlockReason = reason;
-            if (DiagnosticsEnabled && !string.IsNullOrEmpty(reason))
-                Debug.Log($"[CAPE][MOTION BLOCKED] reason={reason}", this);
+            if (!string.IsNullOrEmpty(reason))
+                LogFlowBlocked(reason);
         }
 
         private void StartLift(UpdraftZone zone)
@@ -556,13 +649,14 @@ namespace Game.Player
                 return;
 
             if (liftActive)
-                StopLift("active-zone-changed");
+                StopLift("active-zone-changed", false);
 
             liftActive = true;
             liftZone = zone;
             hovering = false;
-            if (DiagnosticsEnabled)
-                Debug.Log($"[CAPE][LIFT START] zone={zone.name}", this);
+            lastUpPassZone = null;
+            hasUpPassVelocitySample = false;
+            LogFlowEnter(zone);
         }
 
         private void StartHover()
@@ -575,8 +669,12 @@ namespace Game.Player
                 Debug.Log("[CAPE][HOVER START]", this);
         }
 
-        private void StopLift(string reason)
+        private void StopLift(string reason, bool preserveHorizontalMomentum = false)
         {
+            if (liftActive && preserveHorizontalMomentum)
+                BeginPostFlowTrace(liftZone, reason);
+
+            SetHorizontalAirCurrentInfluence(null, preserveHorizontalMomentum);
             if (!liftActive)
                 return;
 
@@ -585,6 +683,110 @@ namespace Game.Player
             hovering = false;
             if (DiagnosticsEnabled)
                 Debug.Log($"[CAPE][LIFT STOP] reason={reason}", this);
+        }
+
+        private void SetHorizontalAirCurrentInfluence(
+            UpdraftZone zone,
+            bool preserveMomentumOnRelease)
+        {
+            if (controller == null)
+                return;
+
+            bool active = zone != null && zone.Direction != AirCurrentDirection.Up;
+            controller.SetHorizontalAirCurrentInfluence(
+                active,
+                active ? zone.FlowDirection.x : 0f,
+                active ? zone.AgainstFlowControl : 1f,
+                preserveMomentumOnRelease);
+        }
+
+        [System.Diagnostics.Conditional("UNITY_EDITOR")]
+        private void LogFlowEnter(UpdraftZone zone)
+        {
+            if (!DiagnosticsEnabled || zone == null || body == null)
+                return;
+
+            Vector2 velocity = body.velocity;
+            float projectedSpeed = Vector2.Dot(velocity, zone.FlowDirection);
+            Debug.Log(
+                $"[CAPE][FLOW ENTER] zone={zone.name} " +
+                $"direction={zone.Direction} endBehavior={zone.EndBehavior} " +
+                $"velocity={velocity} projectedSpeed={projectedSpeed:0.###}",
+                this);
+        }
+
+        [System.Diagnostics.Conditional("UNITY_EDITOR")]
+        private void LogFlowBlocked(string reason)
+        {
+            if (!DiagnosticsEnabled)
+                return;
+
+            UpdraftZone diagnosticZone = liftZone != null ? liftZone : activeZone;
+            string direction = diagnosticZone != null
+                ? diagnosticZone.Direction.ToString()
+                : "None";
+            Debug.Log(
+                $"[CAPE][FLOW BLOCKED] direction={direction} reason={reason}",
+                this);
+        }
+
+        [System.Diagnostics.Conditional("UNITY_EDITOR")]
+        private void LogFlowExit(UpdraftZone zone)
+        {
+            if (!DiagnosticsEnabled || zone == null || body == null)
+                return;
+
+            Debug.Log(
+                $"[CAPE][FLOW EXIT] direction={zone.Direction} velocity={body.velocity}",
+                this);
+        }
+
+        private void BeginPostFlowTrace(UpdraftZone zone, string reason)
+        {
+            if (zone == null)
+                return;
+
+            postFlowTraceDirection = zone.FlowDirection;
+            postFlowTraceReason = reason;
+            postFlowTraceFixedStep = 0;
+            postFlowTraceFixedStepsRemaining = 3;
+        }
+
+        [System.Diagnostics.Conditional("UNITY_EDITOR")]
+        private void LogPostFlowTrace()
+        {
+            if (postFlowTraceFixedStepsRemaining <= 0 || body == null)
+                return;
+
+            if (DiagnosticsEnabled)
+            {
+                float projectedSpeed = Vector2.Dot(body.velocity, postFlowTraceDirection);
+                Debug.Log(
+                    $"[CAPE][FLOW POST EXIT] reason={postFlowTraceReason} " +
+                    $"fixedStep=+{postFlowTraceFixedStep} velocity={body.velocity} " +
+                    $"projectedSpeed={projectedSpeed:0.###}",
+                    this);
+            }
+
+            postFlowTraceFixedStep++;
+            postFlowTraceFixedStepsRemaining--;
+        }
+
+        [System.Diagnostics.Conditional("UNITY_EDITOR")]
+        private void LogUpPassExit(UpdraftZone zone)
+        {
+            if (!DiagnosticsEnabled || body == null ||
+                !hasUpPassVelocitySample || lastUpPassZone != zone ||
+                zone.Direction != AirCurrentDirection.Up ||
+                zone.EndBehavior != AirCurrentEndBehavior.PassThrough)
+            {
+                return;
+            }
+
+            Debug.Log(
+                $"[CAPE][UP PASS] velocityBeforeEnd={lastUpPassVelocityBeforeEnd:0.###} " +
+                $"velocityAtExit={body.velocity.y:0.###}",
+                this);
         }
 
         private void CreatePlaceholderVisual()
@@ -619,9 +821,7 @@ namespace Game.Player
             if (capeVisual == null || capeRenderer == null)
                 return;
 
-            capeVisual.SetActive(equipped);
-            if (!equipped)
-                return;
+            capeVisual.SetActive(true);
 
             int facing = controller != null && controller.FacingLeft ? -1 : 1;
             capeVisual.transform.localPosition = new Vector3(-0.28f * facing, 0.05f, 0f);

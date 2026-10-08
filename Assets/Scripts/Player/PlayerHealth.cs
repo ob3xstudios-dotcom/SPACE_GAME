@@ -116,30 +116,39 @@ namespace Game.Player
         // -------------------------
         public void TakeDamage(int damage, Vector2 sourcePosition)
         {
-            ApplyDamage(damage, sourcePosition);
+            ApplyDamage(damage, sourcePosition, 0f);
         }
 
         // Helper por si queréis llamar desde tests sin source
         public void TakeDamage(int damage)
         {
-            ApplyDamage(damage, transform.position);
+            ApplyDamage(damage, transform.position, 0f);
         }
 
-        private void ApplyDamage(int dmg, Vector2 sourcePosition)
+        /// <summary>
+        /// Uses the normal damage, invulnerability and death pipeline while allowing a
+        /// specific attack to request a longer minimum hit-stun reaction.
+        /// </summary>
+        public bool TryTakeDamage(int damage, Vector2 sourcePosition, float minimumHitStunDuration)
         {
-            if (dmg <= 0) return;
+            return ApplyDamage(damage, sourcePosition, minimumHitStunDuration);
+        }
+
+        private bool ApplyDamage(int dmg, Vector2 sourcePosition, float minimumHitStunDuration)
+        {
+            if (dmg <= 0) return false;
 
             if (playerResources == null || playerResources.Health == null)
             {
                 if (debugLogs) Debug.LogWarning("[PLAYER HEALTH] playerResources/Health NULL");
-                return;
+                return false;
             }
 
             if (invulnerable)
             {
                 if (debugLogs)
                     Debug.Log($"[PLAYER HIT] Ignorado (invulnerable) dmg={dmg} from={sourcePosition}");
-                return;
+                return false;
             }
 
             int before = playerResources.Health.Current;
@@ -160,11 +169,13 @@ namespace Game.Player
             if (after <= 0)
             {
                 Die();
-                return;
+                return true;
             }
 
             if (iFrames > 0f) StartIFrames(iFrames);
-            if (hitStunTime > 0f) StartHitStun(hitStunTime);
+            float effectiveHitStun = Mathf.Max(hitStunTime, minimumHitStunDuration);
+            if (effectiveHitStun > 0f) StartHitStun(effectiveHitStun);
+            return true;
         }
 
         private void ApplyKnockback(Vector2 sourcePosition)
@@ -245,6 +256,7 @@ namespace Game.Player
         {
             if (playerController == null) return;
             if (hitStunCo != null) StopCoroutine(hitStunCo);
+            playerController.PrepareForHitStun();
             hitStunCo = StartCoroutine(HitStunRoutine(duration));
         }
 

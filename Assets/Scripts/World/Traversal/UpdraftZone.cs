@@ -1,19 +1,49 @@
 using System.Collections.Generic;
 using Game.Player;
 using UnityEngine;
+using UnityEngine.Serialization;
 
 namespace Game.World.Traversal
 {
+    public enum AirCurrentDirection
+    {
+        Up,
+        Left,
+        Right
+    }
+
+    public enum AirCurrentEndBehavior
+    {
+        HoldInside,
+        PassThrough
+    }
+
     [DisallowMultipleComponent]
     public sealed class UpdraftZone : MonoBehaviour
     {
-        [Header("Lift")]
-        [SerializeField, Min(0f)] private float liftAcceleration = 18f;
-        [SerializeField, Min(0f)] private float maxRiseSpeed = 7f;
+        [Header("Flow")]
+        [SerializeField] private AirCurrentDirection flowDirection = AirCurrentDirection.Up;
+        [Tooltip("How quickly velocity builds along the flow direction.")]
+        [FormerlySerializedAs("liftAcceleration")]
+        [SerializeField, Min(0f)] private float flowAcceleration = 30f;
+        [Tooltip("The flow accelerates up to this speed; faster external momentum is preserved.")]
+        [FormerlySerializedAs("maxRiseSpeed")]
+        [SerializeField, Min(0f)] private float maxFlowSpeed = 14f;
         [SerializeField, Min(0f)] private float strengthMultiplier = 1f;
 
-        [Header("Top Hover")]
-        [SerializeField, Min(0f)] private float topHoverInset = 0.35f;
+        [Header("Horizontal Flow")]
+        [Tooltip("Fraction of airborne locomotion retained while pressing against the flow. Zero gives the current full authority without deleting existing momentum.")]
+        [SerializeField, Range(0f, 1f)] private float againstFlowControl = 0f;
+        [Tooltip("Multiplies flow acceleration while horizontal input points with the current.")]
+        [SerializeField, Min(0f)] private float withFlowAccelerationMultiplier = 2.5f;
+        [Tooltip("Multiplies the speed up to which horizontal flow accelerates while input points with the current.")]
+        [SerializeField, Min(1f)] private float withFlowMaxSpeedMultiplier = 1.75f;
+
+        [Header("End")]
+        [SerializeField] private AirCurrentEndBehavior endBehavior =
+            AirCurrentEndBehavior.PassThrough;
+        [FormerlySerializedAs("topHoverInset")]
+        [SerializeField, Min(0f)] private float endHoldInset = 0.35f;
         [SerializeField, Min(0.01f)] private float hoverTolerance = 0.08f;
         [SerializeField, Min(0.01f)] private float hoverCorrectionSpeed = 2f;
         [SerializeField, Min(0.01f)] private float hoverStrength = 30f;
@@ -47,11 +77,34 @@ namespace Game.World.Traversal
             }
         }
 
-        public float LiftAcceleration => Mathf.Max(0f, liftAcceleration);
-        public float MaxRiseSpeed => Mathf.Max(0f, maxRiseSpeed);
+        public Vector2 FlowDirection
+        {
+            get
+            {
+                switch (flowDirection)
+                {
+                    case AirCurrentDirection.Left:
+                        return Vector2.left;
+                    case AirCurrentDirection.Right:
+                        return Vector2.right;
+                    default:
+                        return Vector2.up;
+                }
+            }
+        }
+
+        public AirCurrentDirection Direction => flowDirection;
+        public AirCurrentEndBehavior EndBehavior => endBehavior;
+        public float FlowAcceleration => Mathf.Max(0f, flowAcceleration);
+        public float MaxFlowSpeed => Mathf.Max(0f, maxFlowSpeed);
         public float StrengthMultiplier => Mathf.Max(0f, strengthMultiplier);
-        public float EffectiveLiftAcceleration => LiftAcceleration * StrengthMultiplier;
-        public float TopHoverInset => Mathf.Max(0f, topHoverInset);
+        public float EffectiveFlowAcceleration => FlowAcceleration * StrengthMultiplier;
+        public float AgainstFlowControl => Mathf.Clamp01(againstFlowControl);
+        public float WithFlowAccelerationMultiplier =>
+            Mathf.Max(0f, withFlowAccelerationMultiplier);
+        public float WithFlowMaxSpeedMultiplier =>
+            Mathf.Max(1f, withFlowMaxSpeedMultiplier);
+        public float EndHoldInset => Mathf.Max(0f, endHoldInset);
         public float HoverTolerance => Mathf.Max(0.01f, hoverTolerance);
         public float HoverCorrectionSpeed => Mathf.Max(0.01f, hoverCorrectionSpeed);
         public float HoverStrength => Mathf.Max(0.01f, hoverStrength);
@@ -156,39 +209,81 @@ namespace Game.World.Traversal
                 otherTransform.root.CompareTag("Player");
         }
 
-        public float GetProjectedVerticalSpeed(float currentVerticalSpeed, float fixedDeltaTime)
+        public float GetProjectedFlowSpeed(Vector2 velocity, float fixedDeltaTime)
         {
-            if (currentVerticalSpeed >= MaxRiseSpeed)
-                return currentVerticalSpeed;
+            return GetProjectedFlowSpeed(
+                Vector2.Dot(velocity, FlowDirection),
+                fixedDeltaTime);
+        }
+
+        public float GetProjectedFlowSpeed(float currentFlowSpeed, float fixedDeltaTime)
+        {
+            return GetProjectedFlowSpeed(currentFlowSpeed, fixedDeltaTime, 1f);
+        }
+
+        public float GetProjectedFlowSpeed(
+            float currentFlowSpeed,
+            float fixedDeltaTime,
+            float accelerationMultiplier)
+        {
+            return GetProjectedFlowSpeed(
+                currentFlowSpeed,
+                fixedDeltaTime,
+                accelerationMultiplier,
+                1f);
+        }
+
+        public float GetProjectedFlowSpeed(
+            float currentFlowSpeed,
+            float fixedDeltaTime,
+            float accelerationMultiplier,
+            float maxSpeedMultiplier)
+        {
+            // This is an acceleration field with a finite contribution cap. The cap only
+            // stops further acceleration; it never removes faster external momentum.
+            float flowSpeedLimit = MaxFlowSpeed * Mathf.Max(0f, maxSpeedMultiplier);
+            if (currentFlowSpeed >= flowSpeedLimit)
+                return currentFlowSpeed;
 
             return Mathf.MoveTowards(
-                currentVerticalSpeed,
-                MaxRiseSpeed,
-                EffectiveLiftAcceleration * Mathf.Max(0f, fixedDeltaTime));
+                currentFlowSpeed,
+                flowSpeedLimit,
+                EffectiveFlowAcceleration *
+                Mathf.Max(0f, accelerationMultiplier) *
+                Mathf.Max(0f, fixedDeltaTime));
         }
 
-        public bool TryGetTopHoverY(out float hoverY)
-        {
-            return TryGetTopHoverY(out hoverY, out _);
-        }
-
-        public bool TryGetTopHoverY(out float hoverY, out float topBoundaryY)
+        public bool TryGetEndHoldCoordinates(
+            out float holdCoordinate,
+            out float boundaryCoordinate)
         {
             Collider2D currentCollider = zoneCollider != null
                 ? zoneCollider
                 : GetComponent<Collider2D>();
             if (currentCollider == null)
             {
-                hoverY = transform.position.y;
-                topBoundaryY = hoverY;
+                boundaryCoordinate = Vector2.Dot(transform.position, FlowDirection);
+                holdCoordinate = boundaryCoordinate;
                 return false;
             }
 
             Bounds bounds = currentCollider.bounds;
-            float inset = Mathf.Min(TopHoverInset, Mathf.Max(0f, bounds.size.y));
-            topBoundaryY = bounds.max.y;
-            hoverY = topBoundaryY - inset;
+            Vector2 direction = FlowDirection;
+            float flowExtent = direction.x == 0f ? bounds.size.y : bounds.size.x;
+            float inset = Mathf.Min(EndHoldInset, Mathf.Max(0f, flowExtent));
+            boundaryCoordinate = GetLeadingEdgeCoordinate(bounds, direction);
+            holdCoordinate = boundaryCoordinate - inset;
             return true;
+        }
+
+        public static float GetLeadingEdgeCoordinate(Bounds bounds, Vector2 direction)
+        {
+            if (direction.x > 0f)
+                return bounds.max.x;
+            if (direction.x < 0f)
+                return -bounds.min.x;
+
+            return bounds.max.y;
         }
 
 #if UNITY_EDITOR
@@ -201,10 +296,13 @@ namespace Game.World.Traversal
 
         private void OnValidate()
         {
-            liftAcceleration = Mathf.Max(0f, liftAcceleration);
-            maxRiseSpeed = Mathf.Max(0f, maxRiseSpeed);
+            flowAcceleration = Mathf.Max(0f, flowAcceleration);
+            maxFlowSpeed = Mathf.Max(0f, maxFlowSpeed);
             strengthMultiplier = Mathf.Max(0f, strengthMultiplier);
-            topHoverInset = Mathf.Max(0f, topHoverInset);
+            againstFlowControl = Mathf.Clamp01(againstFlowControl);
+            withFlowAccelerationMultiplier = Mathf.Max(0f, withFlowAccelerationMultiplier);
+            withFlowMaxSpeedMultiplier = Mathf.Max(1f, withFlowMaxSpeedMultiplier);
+            endHoldInset = Mathf.Max(0f, endHoldInset);
             hoverTolerance = Mathf.Max(0.01f, hoverTolerance);
             hoverCorrectionSpeed = Mathf.Max(0.01f, hoverCorrectionSpeed);
             hoverStrength = Mathf.Max(0.01f, hoverStrength);
@@ -231,9 +329,9 @@ namespace Game.World.Traversal
                 Gizmos.DrawCube(box.offset, box.size);
                 Gizmos.color = outline;
                 Gizmos.DrawWireCube(box.offset, box.size);
-                DrawLocalArrows(box.offset, box.size);
                 Gizmos.matrix = previousMatrix;
-                DrawHoverLine(currentCollider);
+                DrawWorldArrows(currentCollider.bounds);
+                DrawEndHoldLine(currentCollider);
                 return;
             }
 
@@ -243,39 +341,63 @@ namespace Game.World.Traversal
                 Gizmos.DrawCube(currentCollider.bounds.center, currentCollider.bounds.size);
                 Gizmos.color = outline;
                 Gizmos.DrawWireCube(currentCollider.bounds.center, currentCollider.bounds.size);
-                DrawHoverLine(currentCollider);
+                DrawWorldArrows(currentCollider.bounds);
+                DrawEndHoldLine(currentCollider);
             }
         }
 
-        private void DrawHoverLine(Collider2D currentCollider)
+        private void DrawEndHoldLine(Collider2D currentCollider)
         {
-            if (currentCollider == null || !TryGetTopHoverY(out float hoverY))
+            if (endBehavior != AirCurrentEndBehavior.HoldInside ||
+                currentCollider == null ||
+                !TryGetEndHoldCoordinates(out float holdCoordinate, out _))
+            {
                 return;
+            }
 
             Matrix4x4 previousMatrix = Gizmos.matrix;
             Gizmos.matrix = Matrix4x4.identity;
             Gizmos.color = new Color(gizmoColor.r, gizmoColor.g, gizmoColor.b, 1f);
             Bounds bounds = currentCollider.bounds;
-            Gizmos.DrawLine(
-                new Vector3(bounds.min.x, hoverY, transform.position.z),
-                new Vector3(bounds.max.x, hoverY, transform.position.z));
+            Vector2 direction = FlowDirection;
+            if (direction.x == 0f)
+            {
+                Gizmos.DrawLine(
+                    new Vector3(bounds.min.x, holdCoordinate, transform.position.z),
+                    new Vector3(bounds.max.x, holdCoordinate, transform.position.z));
+            }
+            else
+            {
+                float holdX = direction.x > 0f ? holdCoordinate : -holdCoordinate;
+                Gizmos.DrawLine(
+                    new Vector3(holdX, bounds.min.y, transform.position.z),
+                    new Vector3(holdX, bounds.max.y, transform.position.z));
+            }
             Gizmos.matrix = previousMatrix;
         }
 
-        private void DrawLocalArrows(Vector2 center, Vector2 size)
+        private void DrawWorldArrows(Bounds bounds)
         {
             Gizmos.color = new Color(gizmoColor.r, gizmoColor.g, gizmoColor.b, 1f);
-            float bottom = center.y - size.y * 0.32f;
-            float top = center.y + size.y * 0.32f;
-            float headSize = Mathf.Min(size.x, size.y) * 0.08f;
+            Vector2 direction = FlowDirection;
+            Vector2 perpendicular = direction.x == 0f ? Vector2.right : Vector2.up;
+            float flowSize = direction.x == 0f ? bounds.size.y : bounds.size.x;
+            float perpendicularSize = direction.x == 0f ? bounds.size.x : bounds.size.y;
+            Vector2 center = bounds.center;
+            float halfArrowLength = flowSize * 0.32f;
+            float headSize = Mathf.Min(bounds.size.x, bounds.size.y) * 0.08f;
 
             for (int i = -1; i <= 1; i++)
             {
-                float x = center.x + size.x * 0.25f * i;
-                Vector3 arrowTop = new Vector3(x, top, 0f);
-                Gizmos.DrawLine(new Vector3(x, bottom, 0f), arrowTop);
-                Gizmos.DrawLine(arrowTop, new Vector3(x - headSize, top - headSize, 0f));
-                Gizmos.DrawLine(arrowTop, new Vector3(x + headSize, top - headSize, 0f));
+                Vector2 laneOffset = perpendicular * (perpendicularSize * 0.25f * i);
+                Vector2 arrowStart = center + laneOffset - direction * halfArrowLength;
+                Vector2 arrowEnd = center + laneOffset + direction * halfArrowLength;
+                Vector2 headBase = arrowEnd - direction * headSize;
+                Vector2 headA = headBase + perpendicular * headSize;
+                Vector2 headB = headBase - perpendicular * headSize;
+                Gizmos.DrawLine(arrowStart, arrowEnd);
+                Gizmos.DrawLine(arrowEnd, headA);
+                Gizmos.DrawLine(arrowEnd, headB);
             }
         }
 #endif

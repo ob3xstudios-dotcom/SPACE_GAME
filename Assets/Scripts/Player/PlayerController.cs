@@ -97,10 +97,17 @@ namespace Game.Player
         [SerializeField] private Vector2 groundCheckBoxSize = new Vector2(0.70f, 0.08f);
         [SerializeField, Range(0.01f, 0.25f)] private float groundCheckDistance = 0.08f;
         public LayerMask groundLayer;
+        [Tooltip("Capas de actores que pueden servir como suelo solo si llevan PlayerStandableSurface.")]
+        [SerializeField] private LayerMask standableActorMask = 256;
         [Tooltip("Solo cuenta como suelo si la normal apunta hacia arriba (evita que pared lateral te ponga grounded).")]
         [SerializeField, Range(0f, 1f)] private float groundNormalMinY = 0.55f;
         [SerializeField, Min(0f)] private float slopeStickSpeed = 2f;
         private const float SlopeNormalMaxY = 0.999f;
+
+        [Header("Standable Surface Stability")]
+        [SerializeField, Range(0.01f, 0.25f)] private float standableIdleInputThreshold = 0.05f;
+        [SerializeField, Min(0f)] private float standableDriftCorrectionSpeed = 2f;
+        [SerializeField, Range(0.08f, 0.15f)] private float releasedSupportIgnoreDuration = 0.15f;
 
         [Header("Wall Check")]
         public Transform wallCheck;
@@ -229,6 +236,10 @@ namespace Game.Player
         [SerializeField] private bool allowVerticalAim = true;
         [SerializeField, Range(0f, 2f)] private float attackOffset = 0f;
 
+        [Header("Combat - Up Attack")]
+        [SerializeField, Range(0f, 2f)] private float upAttackOffset = 0.62f;
+        [SerializeField, Range(0.01f, 2f)] private float upAttackRadius = 0.5f;
+
         [Header("Combat - Direction thresholds")]
         [SerializeField, Range(0.1f, 1f)] private float attackDownThreshold = 0.35f;
         [SerializeField, Range(0.1f, 1f)] private float attackUpThreshold = 0.35f;
@@ -242,12 +253,21 @@ namespace Game.Player
         [SerializeField, Range(0f, 0.12f)] private float hitStopSeconds = 0.05f;
         [SerializeField, Range(0f, 25f)] private float pogoBounceForce = 12f;
 
+        [Header("Combat - Enemy Down Hit Bounce")]
+        [SerializeField, Range(0f, 25f)] private float downHitBounceVertical = 14f;
+        [SerializeField, Range(0f, 10f)] private float downHitBounceHorizontal = 3.5f;
+        [SerializeField, Range(0f, 25f)] private float tankDownHitBounceVertical = 8f;
+        [SerializeField, Range(0f, 10f)] private float tankDownHitBounceHorizontal = 5f;
+        [SerializeField, Range(0.15f, 0.5f)] private float tankDownHitSupportIgnoreMaxDuration = 0.35f;
+
         // --------------------
         // STEALTH MOVEMENT
         // --------------------
         [Header("Stealth Movement")]
         [SerializeField, Range(0.1f, 1f)] private float crouchSpeedMultiplier = 0.6f;
         [SerializeField, Range(0.1f, 1f)] private float layDownSpeedMultiplier = 0.35f;
+        [SerializeField, Range(0.1f, 1f)] private float stealthWalkSpeedMultiplier = 0.5f;
+        [SerializeField, Range(0.1f, 0.95f)] private float analogStealthWalkMaxMagnitude = 0.55f;
         [SerializeField, Min(1f)] private float sprintSpeedMultiplier = 1.4f;
         [SerializeField, Min(0f)] private float sprintMaxDuration = 1f;
         [SerializeField, Min(0f)] private float sprintRegenDelay = 1f;
@@ -348,13 +368,26 @@ namespace Game.Player
         private float handPivotUprightRotation;
         private int handPivotExitFacing;
 
+        [Header("Overhead Rail Stealth")]
+        [SerializeField, Range(0f, 1f)] private float overheadRailStealthEnterThreshold = 0.55f;
+        [SerializeField, Range(0f, 1f)] private float overheadRailStealthExitThreshold = 0.25f;
+        [SerializeField, Range(0.1f, 1f)] private float overheadRailStealthMoveMultiplier = 0.5f;
+
         private SliderJoint2D overheadRailJoint;
         private OverheadHangRail currentOverheadRail;
         private bool isOverheadRailHanging;
+        private bool isOverheadRailStealthHanging;
         private float overheadRailAlongSpeed;
         private RigidbodyType2D overheadRailCachedBodyType;
         private RigidbodyConstraints2D overheadRailCachedConstraints;
         private float overheadRailCachedGravityScale;
+
+        private FlagSpringPole currentFlagSpringPole;
+        private bool isFlagSpringPoleAttached;
+        private Vector2 flagSpringPoleHandOffset;
+        private RigidbodyType2D flagSpringPoleCachedBodyType;
+        private RigidbodyConstraints2D flagSpringPoleCachedConstraints;
+        private float flagSpringPoleCachedGravityScale;
 
         // --------------------
         // RUNTIME STATE
@@ -388,10 +421,24 @@ namespace Game.Player
         private Collider2D wallSlideVisualCollider;
         private Collider2D currentGroundCollider;
         private HorizontalMovingPlatform currentGroundPlatform;
+        private PlayerStandableSurface currentGroundStandableSurface;
+        private PlayerStandableSurface idleAnchorStandableSurface;
+        private PlayerStandableSurface ignoredStandableSurface;
+        private float idleStandableOffsetX;
+        private float ignoredStandableTimer;
+        private float ignoredStandableMinimumTimer;
+        private bool ignoredStandableWaitForHorizontalSeparation;
         private ConveyorBelt currentGroundConveyor;
         private WoodWorkpiece currentGroundWoodWorkpiece;
         private float appliedConveyorVelocityX;
         private bool suppressConveyorUntilAirborne;
+        private bool horizontalAirCurrentInfluence;
+        private float horizontalAirCurrentDirectionX;
+        private float horizontalAirCurrentAgainstFlowControl = 1f;
+        private bool horizontalAirCurrentMomentumActive;
+        private float horizontalAirCurrentMomentumDirectionX;
+        private int horizontalAirCurrentMomentumGraceFixedSteps;
+        private bool upwardAirCurrentMomentumProtected;
         private float slipperyTimer;
         private float slipperyGroundAccelerationMultiplier = 1f;
         private float slipperyGroundDecelerationMultiplier = 1f;
@@ -465,6 +512,17 @@ namespace Game.Player
         private readonly HashSet<UnityEngine.Object> attackDamageTargets = new HashSet<UnityEngine.Object>();
         private readonly List<IInteractable> interactablesInRange = new List<IInteractable>();
         private bool lastAttackHitEnemy;
+        private bool lastAttackAllowsDownBounce;
+        private bool lastAttackUsesDirectionalDownHitBounce;
+        private bool lastAttackUsesTankDownHitBounce;
+        private int lastDownHitPlayerSeparationDirection;
+        private bool pendingDownHitBounce;
+        private bool pendingDownHitBounceOverridesHorizontal;
+        private float pendingDownHitBounceHorizontal;
+        private float pendingDownHitBounceVertical;
+        private int lastQueuedDownHitBounceAttackId;
+        private bool downHitBounceAscentProtected;
+        private int attackSequenceId;
 
         private int facingDir = 1;
         private float attackPointLocalXAbs;
@@ -541,11 +599,13 @@ namespace Game.Player
         public bool IsGrounded => isGrounded;
         public Collider2D CurrentGroundCollider => currentGroundCollider;
         public bool IsGroundedOnMovingSupport =>
-            currentGroundPlatform != null || currentGroundWoodWorkpiece != null;
+            currentGroundPlatform != null ||
+            currentGroundStandableSurface != null ||
+            currentGroundWoodWorkpiece != null;
         public bool IsAttacking => isAttacking;
         public bool IsDashing => isDashing;
         public bool IsExternalControlLocked => externalControlLocked;
-        public bool IsHanging => isHanging;
+        public bool IsHanging => isHanging || isFlagSpringPoleAttached;
         public bool IsWallSliding => isWallSliding;
         public bool IsWallLosingContact => isWallSliding && isWallLosingContact;
         public int WallSide => wallSide;
@@ -562,6 +622,8 @@ namespace Game.Player
         public bool IsPostDiveSliding => sprintSlideDiveState == SprintSlideDiveState.ProneSlide;
         public bool IsSlippery => slipperyTimer > 0f;
         public bool IsOverheadRailHanging => isOverheadRailHanging;
+        public bool IsOverheadRailStealthHanging => isOverheadRailStealthHanging;
+        public bool IsFlagSpringPoleAttached => isFlagSpringPoleAttached;
         public bool IsNormalJumpAnticipating => hasPendingNormalJump;
         public bool CanUseUpdraftCapeMotion =>
             isActiveAndEnabled &&
@@ -577,6 +639,7 @@ namespace Game.Player
             !isLedgeClimbing &&
             !IsSwinging &&
             !isOverheadRailHanging &&
+            !isFlagSpringPoleAttached &&
             !IsSliding &&
             !IsDiving &&
             !IsPostDiveSliding &&
@@ -595,6 +658,50 @@ namespace Game.Player
         // Para Animator (si lo usáis)
         public bool IsCrouching => input != null && input.IsCrouching;
         public bool IsLayDown => input != null && input.IsLayDown;
+        public bool IsStealthWalking =>
+            !IsCrouching &&
+            !IsLayDown &&
+            IsStealthWalkRequested();
+        public bool IsStealthModeActive =>
+            IsCrouching ||
+            IsLayDown ||
+            IsStealthWalking ||
+            IsOverheadRailStealthHanging;
+        public bool IsSilentForEnemyHearing => IsStealthModeActive;
+
+        internal void SetHorizontalAirCurrentInfluence(
+            bool active,
+            float flowDirectionX,
+            float againstFlowControl,
+            bool preserveMomentumOnRelease)
+        {
+            bool wasActive = horizontalAirCurrentInfluence;
+            bool nextActive = active && Mathf.Abs(flowDirectionX) > 0.5f;
+            if (wasActive && !nextActive)
+            {
+                if (preserveMomentumOnRelease)
+                    CaptureHorizontalAirCurrentMomentum();
+                else
+                    ClearHorizontalAirCurrentMomentum();
+            }
+            else if (nextActive)
+            {
+                ClearHorizontalAirCurrentMomentum();
+            }
+
+            horizontalAirCurrentInfluence = nextActive;
+            horizontalAirCurrentDirectionX = horizontalAirCurrentInfluence
+                ? Mathf.Sign(flowDirectionX)
+                : 0f;
+            horizontalAirCurrentAgainstFlowControl = horizontalAirCurrentInfluence
+                ? Mathf.Clamp01(againstFlowControl)
+                : 1f;
+        }
+
+        internal void ProtectUpwardAirCurrentMomentum()
+        {
+            upwardAirCurrentMomentumProtected = true;
+        }
 
         public void FaceDirection(int dir)
         {
@@ -605,6 +712,9 @@ namespace Game.Player
 
         public void SetExternalControlLocked(bool locked)
         {
+            if (locked && isFlagSpringPoleAttached)
+                ForceEndFlagSpringPoleForReset();
+
             if (locked && isOverheadRailHanging)
                 ExitOverheadRail(false);
 
@@ -671,6 +781,7 @@ namespace Game.Player
             InvalidateSwingGrabTemporalState();
             ClearSprintCrouchDecision();
             ClearSlipperyEffect();
+            ForceEndFlagSpringPoleForReset();
             ForceEndOverheadRailForReset();
 
             attackCooldownTimer = 0f;
@@ -700,12 +811,31 @@ namespace Game.Player
             slopeMovementSuppressedUntilAirborne = false;
             groundNormal = Vector2.up;
             currentGroundCollider = null;
+            currentGroundPlatform = null;
+            currentGroundStandableSurface = null;
+            idleAnchorStandableSurface = null;
+            ignoredStandableSurface = null;
+            idleStandableOffsetX = 0f;
+            ignoredStandableTimer = 0f;
+            ignoredStandableMinimumTimer = 0f;
+            ignoredStandableWaitForHorizontalSeparation = false;
+            pendingDownHitBounce = false;
+            pendingDownHitBounceOverridesHorizontal = false;
+            pendingDownHitBounceHorizontal = 0f;
+            pendingDownHitBounceVertical = 0f;
+            lastQueuedDownHitBounceAttackId = 0;
+            downHitBounceAscentProtected = false;
             wasUsingSlopeMovementLastMove = false;
             slopeHorizontalSpeed = 0f;
             currentGroundConveyor = null;
             currentGroundWoodWorkpiece = null;
             appliedConveyorVelocityX = 0f;
             suppressConveyorUntilAirborne = false;
+            horizontalAirCurrentInfluence = false;
+            horizontalAirCurrentDirectionX = 0f;
+            horizontalAirCurrentAgainstFlowControl = 1f;
+            ClearHorizontalAirCurrentMomentum();
+            upwardAirCurrentMomentumProtected = false;
 
             if (carriedObject != null)
                 carriedObject.Drop();
@@ -814,7 +944,15 @@ namespace Game.Player
 
         private void OnDisable()
         {
+            horizontalAirCurrentInfluence = false;
+            horizontalAirCurrentDirectionX = 0f;
+            horizontalAirCurrentAgainstFlowControl = 1f;
+            ClearHorizontalAirCurrentMomentum();
+            upwardAirCurrentMomentumProtected = false;
+            pendingDownHitBounce = false;
+            downHitBounceAscentProtected = false;
             CancelSprintCrouchDecision("PlayerController.OnDisable", true);
+            ForceEndFlagSpringPoleForReset();
 
             if (playerHealth != null)
                 playerHealth.OnDamaged -= HandlePlayerDamaged;
@@ -1147,6 +1285,7 @@ namespace Game.Player
         private void Update()
         {
             UpdateSlipperyEffect(Time.deltaTime);
+            UpdateIgnoredStandableTimer(Time.deltaTime);
 
             if (stats == null || input == null) return;
 
@@ -1191,6 +1330,12 @@ namespace Game.Player
                 // movement and physics, but do not process gameplay state or input.
                 dashCooldownTimer -= Time.deltaTime;
                 attackCooldownTimer -= Time.deltaTime;
+                return;
+            }
+
+            if (isFlagSpringPoleAttached)
+            {
+                UpdateFlagSpringPoleTraversal();
                 return;
             }
 
@@ -1363,9 +1508,26 @@ namespace Game.Player
             if (jumpBufferTimer > 0f && TryUseDoubleJump())
                 jumpBufferTimer = 0f;
 
-            // Jump cut
-            if (!input.JumpHeld && rb.velocity.y > 0.01f)
+            if (upwardAirCurrentMomentumProtected &&
+                (isGrounded || rb.velocity.y <= 0.01f))
+            {
+                upwardAirCurrentMomentumProtected = false;
+            }
+
+            if (downHitBounceAscentProtected &&
+                rb.velocity.y <= 0.01f)
+            {
+                downHitBounceAscentProtected = false;
+            }
+
+            // A PassThrough air current keeps the upward momentum it added until
+            // gravity reaches the apex; ordinary jump ascent still uses jump cut.
+            if (!upwardAirCurrentMomentumProtected &&
+                !downHitBounceAscentProtected &&
+                !input.JumpHeld && rb.velocity.y > 0.01f)
+            {
                 rb.velocity = new Vector2(rb.velocity.x, rb.velocity.y * stats.jumpCutMultiplier);
+            }
 
             // Recargar air dashes
             if (isGrounded)
@@ -1379,6 +1541,14 @@ namespace Game.Player
         {
             if (stats == null || input == null) return;
             if (externalControlLocked) return;
+
+            if (isFlagSpringPoleAttached)
+            {
+                UpdateSprintTimers(Time.fixedDeltaTime);
+                sprintActive = false;
+                sprintWasGrounded = isGrounded;
+                return;
+            }
 
             if (isOverheadRailHanging)
             {
@@ -1455,6 +1625,7 @@ namespace Game.Player
                     parryMoveStopDecel * Time.fixedDeltaTime);
                 SetHorizontalVelocityWithConveyor(newVX);
                 ApplyBetterJumpGravity();
+                ApplyPendingDownHitBounce();
                 return;
             }
 
@@ -1463,6 +1634,7 @@ namespace Game.Player
             if (isWallSliding)
                 ApplyWallSlideVelocity();
             ApplyMovingPlatformDelta();
+            ApplyPendingDownHitBounce();
         }
 
         // --------------------
@@ -1475,6 +1647,7 @@ namespace Game.Player
             DropCarriedObject();
 
             ComputeAndLockAttackDirection();
+            attackSequenceId = attackSequenceId == int.MaxValue ? 1 : attackSequenceId + 1;
 
             animDriver?.TriggerAttack(lockedAttackDirType);
 
@@ -1488,16 +1661,79 @@ namespace Game.Player
             attackCooldownTimer = attackCooldown;
 
             if (debugLogs)
-                Debug.Log($"[PLAYER ATTACK] dirType={lockedAttackDirType} dir={lockedAttackDir} didHit={didHit} enemy={lastAttackHitEnemy}");
+            {
+                Debug.Log(
+                    $"[PLAYER ATTACK] direction={GetLockedAttackDirection()} " +
+                    $"attackId={attackSequenceId} didHit={didHit} enemy={lastAttackHitEnemy}");
+            }
 
             if (didHit)
             {
                 if (lastAttackHitEnemy && hitStopSeconds > 0f)
                     HitStopManager.Request(hitStopSeconds);
 
-                if (lockedAttackDirType == 2 && !isGrounded && pogoBounceForce > 0f)
-                    rb.velocity = new Vector2(rb.velocity.x, Mathf.Max(rb.velocity.y, pogoBounceForce));
+                if (lockedAttackDirType == 2 && lastAttackAllowsDownBounce)
+                    QueueDownHitBounce();
             }
+        }
+
+        private void QueueDownHitBounce()
+        {
+            if (pendingDownHitBounce || lastQueuedDownHitBounceAttackId == attackSequenceId)
+                return;
+
+            pendingDownHitBounceOverridesHorizontal =
+                lastAttackUsesDirectionalDownHitBounce;
+            if (pendingDownHitBounceOverridesHorizontal)
+            {
+                int direction = lastDownHitPlayerSeparationDirection != 0
+                    ? lastDownHitPlayerSeparationDirection
+                    : facingDir;
+                float horizontalBounce = lastAttackUsesTankDownHitBounce
+                    ? tankDownHitBounceHorizontal
+                    : downHitBounceHorizontal;
+                pendingDownHitBounceHorizontal = direction * horizontalBounce;
+                pendingDownHitBounceVertical = lastAttackUsesTankDownHitBounce
+                    ? tankDownHitBounceVertical
+                    : downHitBounceVertical;
+            }
+            else
+            {
+                pendingDownHitBounceHorizontal = 0f;
+                pendingDownHitBounceVertical = pogoBounceForce;
+            }
+
+            pendingDownHitBounce = true;
+            lastQueuedDownHitBounceAttackId = attackSequenceId;
+        }
+
+        private void ApplyPendingDownHitBounce()
+        {
+            if (!pendingDownHitBounce)
+                return;
+
+            pendingDownHitBounce = false;
+            ClearGroundStateForDownHitBounce();
+            float velocityX = pendingDownHitBounceOverridesHorizontal
+                ? pendingDownHitBounceHorizontal
+                : rb.velocity.x;
+            rb.velocity = new Vector2(
+                velocityX,
+                Mathf.Max(rb.velocity.y, pendingDownHitBounceVertical));
+            downHitBounceAscentProtected = rb.velocity.y > 0.01f;
+        }
+
+        private void ClearGroundStateForDownHitBounce()
+        {
+            isGrounded = false;
+            groundNormal = Vector2.up;
+            currentGroundCollider = null;
+            currentGroundPlatform = null;
+            currentGroundStandableSurface = null;
+            idleAnchorStandableSurface = null;
+            idleStandableOffsetX = 0f;
+            slopeMovementSuppressedUntilAirborne = true;
+            UpdateGroundConveyor(null, null);
         }
 
         private void CancelAttack(string reason)
@@ -1538,6 +1774,10 @@ namespace Game.Player
             if (attackPoint == null) return false;
 
             attackDamageTargets.Clear();
+            lastAttackAllowsDownBounce = false;
+            lastAttackUsesDirectionalDownHitBounce = false;
+            lastAttackUsesTankDownHitBounce = false;
+            lastDownHitPlayerSeparationDirection = 0;
 
             if (!allowVerticalAim)
                 dir = new Vector2(facingDir, 0f);
@@ -1547,12 +1787,24 @@ namespace Game.Player
 
             float offset = attackOffset;
             if (offset <= 0f)
-                offset = Mathf.Max(0.01f, Mathf.Abs(attackPoint.localPosition.x));
+            {
+                offset = attackPointLocalXAbs > 0f
+                    ? attackPointLocalXAbs
+                    : Mathf.Max(0.01f, Mathf.Abs(attackPoint.localPosition.x));
+            }
+
+            Game.Combat.PlayerAttackDirection attackDirection = GetLockedAttackDirection();
+            float queryRadius = attackRadius;
+            if (attackDirection == Game.Combat.PlayerAttackDirection.Up)
+            {
+                offset = upAttackOffset;
+                queryRadius = upAttackRadius;
+            }
 
             Vector2 hitPos = (Vector2)transform.position + dir.normalized * offset;
             attackPoint.position = hitPos;
 
-            int count = Physics2D.OverlapCircleNonAlloc(hitPos, attackRadius, attackHits, enemyLayer);
+            int count = Physics2D.OverlapCircleNonAlloc(hitPos, queryRadius, attackHits, enemyLayer);
             bool didHit = false;
             lastAttackHitEnemy = false;
 
@@ -1560,6 +1812,78 @@ namespace Game.Player
             {
                 var hitCol = attackHits[i];
                 if (hitCol == null) continue;
+
+                var playerAttackReceiver =
+                    hitCol.GetComponent<Game.Combat.IPlayerAttackReceiver>() ??
+                    hitCol.GetComponentInParent<Game.Combat.IPlayerAttackReceiver>();
+
+                if (playerAttackReceiver != null)
+                {
+                    UnityEngine.Object receiverTarget = playerAttackReceiver as UnityEngine.Object;
+                    if (receiverTarget != null && !attackDamageTargets.Add(receiverTarget))
+                        continue;
+
+                    bool isCurrentSupport = IsReceiverCurrentStandableSupport(playerAttackReceiver);
+                    var context = new Game.Combat.PlayerAttackContext(
+                        attackSequenceId,
+                        stats.attackDamage,
+                        attackDirection,
+                        dir.normalized,
+                        transform.position,
+                        facingDir,
+                        isCurrentSupport,
+                        transform);
+                    var receiverComponent = receiverTarget as Component;
+                    var receiverHealth = receiverComponent != null
+                        ? receiverComponent.GetComponentInParent<Game.Combat.Health>()
+                        : null;
+                    int healthBefore = receiverHealth != null ? receiverHealth.CurrentHP : -1;
+                    Game.Combat.PlayerAttackResolution resolution =
+                        playerAttackReceiver.ReceivePlayerAttack(context);
+                    int healthAfter = receiverHealth != null ? receiverHealth.CurrentHP : -1;
+
+                    if (resolution == Game.Combat.PlayerAttackResolution.None)
+                        continue;
+
+                    didHit = true;
+                    lastAttackHitEnemy = true;
+                    if (attackDirection == Game.Combat.PlayerAttackDirection.Down &&
+                        (resolution == Game.Combat.PlayerAttackResolution.Damage ||
+                         resolution == Game.Combat.PlayerAttackResolution.BellyUp))
+                    {
+                        lastAttackAllowsDownBounce = true;
+                        bool resolvedBellyUp =
+                            resolution == Game.Combat.PlayerAttackResolution.BellyUp;
+                        if (resolvedBellyUp || !lastAttackUsesDirectionalDownHitBounce)
+                        {
+                            lastAttackUsesDirectionalDownHitBounce = true;
+                            lastDownHitPlayerSeparationDirection =
+                                ResolveDownHitPlayerSeparationDirection(
+                                    receiverComponent,
+                                    hitCol);
+                        }
+                        if (resolvedBellyUp)
+                            lastAttackUsesTankDownHitBounce = true;
+                    }
+                    LogPlayerAttackHit(
+                        receiverTarget,
+                        attackDirection,
+                        resolution,
+                        healthBefore,
+                        healthAfter);
+
+                    if (attackDirection == Game.Combat.PlayerAttackDirection.Down &&
+                        isCurrentSupport &&
+                        (resolution == Game.Combat.PlayerAttackResolution.Damage ||
+                         resolution == Game.Combat.PlayerAttackResolution.BellyUp))
+                    {
+                        ReleaseCurrentStandableSupport(
+                            playerAttackReceiver,
+                            resolution == Game.Combat.PlayerAttackResolution.BellyUp);
+                    }
+
+                    continue;
+                }
 
                 var dmgable =
                     hitCol.GetComponent<Game.Combat.IDamageable>() ??
@@ -1571,11 +1895,32 @@ namespace Game.Player
                     if (damageTarget != null && !attackDamageTargets.Add(damageTarget))
                         continue;
 
+                    bool hitEnemy = IsEnemyHit(hitCol, dmgable);
+                    Component damageComponent = damageTarget as Component;
+                    Game.Combat.Health damageHealth = damageComponent != null
+                        ? damageComponent.GetComponentInParent<Game.Combat.Health>()
+                        : null;
+                    int healthBefore = damageHealth != null ? damageHealth.CurrentHP : -1;
+                    bool wasCurrentSupport =
+                        IsHitCurrentStandableSupport(hitCol, damageComponent);
+                    dmgable.TakeDamage(stats.attackDamage, transform.position);
+                    int healthAfter = damageHealth != null ? damageHealth.CurrentHP : -1;
+                    bool damageApplied = damageHealth == null || healthAfter < healthBefore;
+                    if (!damageApplied)
+                        continue;
+
                     didHit = true;
-                    if (IsEnemyHit(hitCol, dmgable))
+                    if (hitEnemy)
                         lastAttackHitEnemy = true;
 
-                    dmgable.TakeDamage(stats.attackDamage, transform.position);
+                    if (hitEnemy &&
+                        attackDirection == Game.Combat.PlayerAttackDirection.Down)
+                    {
+                        lastAttackAllowsDownBounce = true;
+                        if (wasCurrentSupport)
+                            ReleaseCurrentStandableSupport(false);
+                    }
+
                     continue;
                 }
 
@@ -1588,13 +1933,87 @@ namespace Game.Player
                     if (!attackDamageTargets.Add(health))
                         continue;
 
+                    int healthBefore = health.CurrentHP;
+                    bool wasCurrentSupport = IsHitCurrentStandableSupport(hitCol, health);
+                    health.TakeDamage(stats.attackDamage, transform.position);
+                    if (health.CurrentHP >= healthBefore)
+                        continue;
+
                     didHit = true;
                     lastAttackHitEnemy = true;
-                    health.TakeDamage(stats.attackDamage, transform.position);
+                    if (attackDirection == Game.Combat.PlayerAttackDirection.Down)
+                    {
+                        lastAttackAllowsDownBounce = true;
+                        if (wasCurrentSupport)
+                            ReleaseCurrentStandableSupport(false);
+                    }
                 }
             }
 
             return didHit;
+        }
+
+        private int ResolveDownHitPlayerSeparationDirection(
+            Component receiverComponent,
+            Collider2D hitCollider)
+        {
+            float playerCenterX = capsule != null && capsule.enabled
+                ? capsule.bounds.center.x
+                : transform.position.x;
+            Collider2D receiverCollider = receiverComponent != null
+                ? receiverComponent.GetComponent<Collider2D>()
+                : null;
+            float enemyCenterX = receiverCollider != null
+                ? receiverCollider.bounds.center.x
+                : hitCollider != null
+                    ? hitCollider.bounds.center.x
+                    : receiverComponent != null
+                        ? receiverComponent.transform.position.x
+                        : playerCenterX;
+            float enemyOffset = enemyCenterX - playerCenterX;
+            if (Mathf.Abs(enemyOffset) > 0.1f)
+                return enemyOffset > 0f ? -1 : 1;
+
+            return facingDir < 0 ? -1 : 1;
+        }
+
+        private Game.Combat.PlayerAttackDirection GetLockedAttackDirection()
+        {
+            if (lockedAttackDirType == 2)
+                return Game.Combat.PlayerAttackDirection.Down;
+            if (lockedAttackDirType == 1)
+                return Game.Combat.PlayerAttackDirection.Up;
+            return Game.Combat.PlayerAttackDirection.Horizontal;
+        }
+
+        private bool IsReceiverCurrentStandableSupport(
+            Game.Combat.IPlayerAttackReceiver receiver)
+        {
+            if (!isGrounded || currentGroundStandableSurface == null || receiver == null)
+                return false;
+
+            var supportReceiver =
+                currentGroundStandableSurface.GetComponent<Game.Combat.IPlayerAttackReceiver>() ??
+                currentGroundStandableSurface.GetComponentInParent<Game.Combat.IPlayerAttackReceiver>();
+            return ReferenceEquals(supportReceiver, receiver);
+        }
+
+        [System.Diagnostics.Conditional("UNITY_EDITOR")]
+        private void LogPlayerAttackHit(
+            UnityEngine.Object target,
+            Game.Combat.PlayerAttackDirection direction,
+            Game.Combat.PlayerAttackResolution resolution,
+            int healthBefore,
+            int healthAfter)
+        {
+            if (!debugLogs)
+                return;
+
+            Debug.Log(
+                $"[PLAYER ATTACK HIT] target={(target != null ? target.name : "None")} " +
+                $"direction={direction} attackId={attackSequenceId} resolvedAs={resolution} " +
+                $"healthBefore={healthBefore} healthAfter={healthAfter}",
+                this);
         }
 
         private static bool IsEnemyHit(Collider2D hitCol, Game.Combat.IDamageable dmgable)
@@ -1603,8 +2022,13 @@ namespace Game.Player
                 return true;
 
             UnityEngine.Object damageObject = dmgable as UnityEngine.Object;
-            if (damageObject is Component component && component.GetComponentInParent<Game.Enemies.EnemyBase>() != null)
-                return true;
+            if (damageObject is Component component)
+            {
+                if (component.GetComponentInParent<Game.Enemies.EnemyBase>() != null)
+                    return true;
+                if (component.GetComponentInParent<Game.Combat.Health>() != null)
+                    return true;
+            }
 
             return false;
         }
@@ -1646,7 +2070,9 @@ namespace Game.Player
         public bool TrySetCarriedObject(BarrelCarryable carryable)
         {
             if (carryable == null) return false;
-            if (IsSwinging || isOverheadRailHanging || IsSliding || IsDiving) return false;
+            if (IsSwinging || isOverheadRailHanging || isFlagSpringPoleAttached ||
+                IsSliding || IsDiving)
+                return false;
             if (carriedObject != null && carriedObject != carryable) return false;
 
             carriedObject = carryable;
@@ -1663,6 +2089,180 @@ namespace Game.Player
         {
             wasCrouching = IsCrouching;
             wasLayDown = IsLayDown;
+        }
+
+        public bool TryEnterFlagSpringPole(FlagSpringPole pole)
+        {
+            if (!CanEnterFlagSpringPole(pole))
+                return false;
+            if (input != null &&
+                !TryStandingPostureAndCancelGesture(
+                    "PlayerController.TryEnterFlagSpringPole"))
+            {
+                return false;
+            }
+            if (!pole.Attach(this))
+                return false;
+
+            DropCarriedObject();
+            ClearSprintMomentum();
+            CancelSprintSlideDiveForReset();
+            if (isDashing)
+                EndDash();
+            if (isOverheadRailHanging)
+                ForceEndOverheadRailForReset();
+            if (IsSwinging)
+                ForceEndSwingForReset();
+            if (isHanging)
+            {
+                if (ledgeClimbRoutine != null)
+                {
+                    StopCoroutine(ledgeClimbRoutine);
+                    ledgeClimbRoutine = null;
+                }
+
+                if (capsule != null)
+                    capsule.enabled = true;
+                ExitHang("flag-spring-pole");
+            }
+
+            flagSpringPoleCachedBodyType = rb.bodyType;
+            flagSpringPoleCachedConstraints = rb.constraints;
+            flagSpringPoleCachedGravityScale = rb.gravityScale;
+            currentFlagSpringPole = pole;
+            isFlagSpringPoleAttached = true;
+            flagSpringPoleHandOffset = SwingHandPosition - rb.position;
+            pendingDownHitBounce = false;
+            downHitBounceAscentProtected = false;
+
+            InvalidateSwingGrabTemporalState();
+            ClearGroundSupportForOverheadTraversal();
+            isWallSliding = false;
+            isWallLosingContact = false;
+            wallJumpLockTimer = 0f;
+            wallJumpRegrabTimer = 0f;
+            wallStickTimer = 0f;
+            wallCoyoteTimer = 0f;
+            wallStickSide = 0;
+            wallCoyoteSide = 0;
+            suppressWallWhileDownHeld = false;
+            jumpBufferTimer = 0f;
+            coyoteTimer = 0f;
+            hasPendingNormalJump = false;
+            pendingNormalJumpTimer = 0f;
+            normalJumpAnticipationAge = 0f;
+
+            rb.bodyType = RigidbodyType2D.Kinematic;
+            rb.constraints = RigidbodyConstraints2D.FreezeRotation;
+            rb.gravityScale = 0f;
+            rb.velocity = Vector2.zero;
+            rb.angularVelocity = 0f;
+            rb.position = pole.GrabPosition - flagSpringPoleHandOffset;
+            return true;
+        }
+
+        public bool CanEnterFlagSpringPole(FlagSpringPole pole)
+        {
+            if (pole == null || !pole.isActiveAndEnabled || !pole.CanGrab(this))
+                return false;
+            if (!isActiveAndEnabled || externalControlLocked)
+                return false;
+            if (rb == null || !rb.simulated || capsule == null || !capsule.enabled)
+                return false;
+            if (isFlagSpringPoleAttached || isAttacking || IsMoveLockedByParry)
+                return false;
+            return true;
+        }
+
+        private void UpdateFlagSpringPoleTraversal()
+        {
+            if (currentFlagSpringPole == null ||
+                !currentFlagSpringPole.isActiveAndEnabled)
+            {
+                ForceEndFlagSpringPoleForReset();
+                return;
+            }
+
+            InputReader.CrouchCommand crouchCommand = input.ConsumeCrouchPress();
+            input.CancelCrouchGesture("PlayerController.UpdateFlagSpringPoleTraversal");
+            input.ClearSwingGrabBuffer();
+            input.ConsumeAttackPressed();
+            input.ConsumeDashPressed();
+            input.ConsumeParryPressed();
+            input.ConsumeInteractPressed();
+
+            if (input.ConsumeJumpPressed())
+            {
+                ExitFlagSpringPole(true, true);
+                return;
+            }
+
+            bool dropRequested = crouchCommand.IsValid ||
+                                 input.MoveInput.y <= -hangDownThreshold;
+            if (dropRequested)
+                ExitFlagSpringPole(false, true);
+        }
+
+        internal void FollowFlagSpringPole(FlagSpringPole pole, Vector2 grabPosition)
+        {
+            if (!isFlagSpringPoleAttached || currentFlagSpringPole != pole || rb == null)
+                return;
+
+            rb.MovePosition(grabPosition - flagSpringPoleHandOffset);
+            rb.velocity = Vector2.zero;
+            rb.angularVelocity = 0f;
+        }
+
+        internal void ForceExitFlagSpringPole(FlagSpringPole pole)
+        {
+            if (!isFlagSpringPoleAttached || currentFlagSpringPole != pole)
+                return;
+
+            ExitFlagSpringPole(false, false);
+        }
+
+        private void ExitFlagSpringPole(bool jumpOff, bool notifyPole)
+        {
+            if (!isFlagSpringPoleAttached)
+                return;
+
+            FlagSpringPole pole = currentFlagSpringPole;
+            float horizontalInput = input != null
+                ? Mathf.Clamp(input.MoveInput.x, -1f, 1f)
+                : 0f;
+            Vector2 exitVelocity = jumpOff && pole != null
+                ? pole.CalculateLaunchVelocity(GetEffectiveJumpForce(), horizontalInput)
+                : Vector2.zero;
+
+            isFlagSpringPoleAttached = false;
+            currentFlagSpringPole = null;
+            rb.bodyType = flagSpringPoleCachedBodyType;
+            rb.constraints = flagSpringPoleCachedConstraints;
+            rb.gravityScale = flagSpringPoleCachedGravityScale;
+            rb.angularVelocity = 0f;
+            rb.velocity = exitVelocity;
+            ClearGroundSupportForOverheadTraversal();
+            slopeMovementSuppressedUntilAirborne = jumpOff;
+            if (jumpOff)
+            {
+                upwardAirCurrentMomentumProtected = false;
+                animDriver?.TriggerJumpStart();
+                if (Mathf.Abs(exitVelocity.x) > 0.01f)
+                    ApplyFacing(exitVelocity.x < 0f ? -1 : 1);
+            }
+
+            if (!notifyPole || pole == null)
+                return;
+            if (jumpOff)
+                pole.NotifyPlayerLaunched(this, exitVelocity);
+            else
+                pole.NotifyPlayerDropped(this);
+        }
+
+        private void ForceEndFlagSpringPoleForReset()
+        {
+            if (isFlagSpringPoleAttached)
+                ExitFlagSpringPole(false, true);
         }
 
         public bool TryEnterOverheadRail(OverheadHangRail rail)
@@ -1683,7 +2283,9 @@ namespace Game.Player
             if (!isActiveAndEnabled || externalControlLocked) return false;
             if (rb == null || !rb.simulated || capsule == null || !capsule.enabled) return false;
             if (swingHandAnchor == null || overheadRailJoint == null) return false;
-            if (isOverheadRailHanging || IsSwinging || isHanging || isDashing) return false;
+            if (isOverheadRailHanging || isFlagSpringPoleAttached ||
+                IsSwinging || isHanging || isDashing)
+                return false;
             if (IsSliding || IsDiving || IsPostDiveSliding) return false;
             if (isAttacking || IsMoveLockedByParry) return false;
             return rail.CanGrabHandAt(SwingHandPosition);
@@ -1715,6 +2317,7 @@ namespace Game.Player
 
             currentOverheadRail = rail;
             isOverheadRailHanging = true;
+            isOverheadRailStealthHanging = false;
             overheadRailAlongSpeed = Vector2.Dot(entryVelocity, tangent);
             isDashing = false;
             isWallSliding = false;
@@ -1770,6 +2373,7 @@ namespace Game.Player
 
         private void UpdateOverheadRailHanging()
         {
+            UpdateOverheadRailStealthState();
             input.CancelCrouchGesture("PlayerController.UpdateOverheadRailHanging");
             input.ClearSwingGrabBuffer();
             input.ConsumeAttackPressed();
@@ -1784,6 +2388,25 @@ namespace Game.Player
 
             if (input.ConsumeInteractPressed())
                 ExitOverheadRail(false);
+        }
+
+        private void UpdateOverheadRailStealthState()
+        {
+            float verticalInput = Mathf.Clamp(input.MoveInput.y, -1f, 1f);
+            float enterThreshold = Mathf.Clamp01(overheadRailStealthEnterThreshold);
+            float exitThreshold = Mathf.Min(
+                enterThreshold,
+                Mathf.Clamp01(overheadRailStealthExitThreshold));
+
+            if (!isOverheadRailStealthHanging)
+            {
+                if (verticalInput >= enterThreshold)
+                    isOverheadRailStealthHanging = true;
+                return;
+            }
+
+            if (verticalInput < exitThreshold)
+                isOverheadRailStealthHanging = false;
         }
 
         private void FixedUpdateOverheadRailHanging()
@@ -1804,8 +2427,12 @@ namespace Game.Player
             if (Mathf.Abs(traversalInput) < wallInputDeadzone)
                 traversalInput = 0f;
 
+            float voluntaryMoveMultiplier = isOverheadRailStealthHanging
+                ? Mathf.Clamp(overheadRailStealthMoveMultiplier, 0.1f, 1f)
+                : 1f;
             float targetSpeed = currentOverheadRail.TransportSpeed +
-                traversalInput * currentOverheadRail.PlayerMoveSpeed;
+                traversalInput * currentOverheadRail.PlayerMoveSpeed *
+                voluntaryMoveMultiplier;
             float rate = Mathf.Abs(traversalInput) > 0.01f
                 ? currentOverheadRail.PlayerAcceleration
                 : currentOverheadRail.PlayerDeceleration;
@@ -1860,6 +2487,7 @@ namespace Game.Player
 
             DisableOverheadRailJoint();
             isOverheadRailHanging = false;
+            isOverheadRailStealthHanging = false;
             currentOverheadRail = null;
             overheadRailAlongSpeed = 0f;
 
@@ -1891,6 +2519,7 @@ namespace Game.Player
             }
 
             isOverheadRailHanging = false;
+            isOverheadRailStealthHanging = false;
             currentOverheadRail = null;
             overheadRailAlongSpeed = 0f;
             ClearGroundSupportForOverheadTraversal();
@@ -1910,6 +2539,7 @@ namespace Game.Player
             isGrounded = false;
             groundNormal = Vector2.up;
             currentGroundPlatform = null;
+            currentGroundStandableSurface = null;
             currentGroundConveyor = null;
             currentGroundWoodWorkpiece = null;
             appliedConveyorVelocityX = 0f;
@@ -1920,8 +2550,47 @@ namespace Game.Player
 
         private void HandlePlayerDamaged(int damage)
         {
+            if (isFlagSpringPoleAttached)
+                ExitFlagSpringPole(false, true);
+
             if (isOverheadRailHanging)
                 ExitOverheadRail(false);
+        }
+
+        /// <summary>
+        /// Releases traversal states that would otherwise leave physics suspended while
+        /// PlayerHealth temporarily disables input processing for hit-stun.
+        /// </summary>
+        internal void PrepareForHitStun()
+        {
+            if (isDashing)
+                EndDash();
+
+            if (isFlagSpringPoleAttached)
+                ExitFlagSpringPole(false, true);
+
+            if (isOverheadRailHanging)
+                ExitOverheadRail(false);
+
+            if (IsSwinging)
+                ForceEndSwingForReset();
+
+            if (isHanging)
+            {
+                if (ledgeClimbRoutine != null)
+                {
+                    StopCoroutine(ledgeClimbRoutine);
+                    ledgeClimbRoutine = null;
+                }
+
+                if (capsule != null)
+                    capsule.enabled = true;
+
+                ExitHang("hit-stun");
+            }
+
+            if (rb != null && rb.bodyType == RigidbodyType2D.Dynamic)
+                rb.gravityScale = defaultGravityScale;
         }
 
         public bool TryEnterSwing(SwingPole pole)
@@ -1950,7 +2619,9 @@ namespace Game.Player
         public bool CanEnterSwing(SwingPole pole)
         {
             if (pole == null) return false;
-            if (IsSwinging || isOverheadRailHanging || isHanging || IsSliding || IsDiving) return false;
+            if (IsSwinging || isOverheadRailHanging || isFlagSpringPoleAttached ||
+                isHanging || IsSliding || IsDiving)
+                return false;
             if (swingCooldownTimer > 0f) return false;
             return pole.CanCatch(this, rb);
         }
@@ -1958,7 +2629,9 @@ namespace Game.Player
         public bool CanEnterSwingFromCoyote(SwingPole pole)
         {
             if (pole == null) return false;
-            if (IsSwinging || isOverheadRailHanging || isHanging || IsSliding || IsDiving) return false;
+            if (IsSwinging || isOverheadRailHanging || isFlagSpringPoleAttached ||
+                isHanging || IsSliding || IsDiving)
+                return false;
             if (swingCooldownTimer > 0f) return false;
             return pole.CanCatchDuringCoyote(this, rb);
         }
@@ -2008,7 +2681,9 @@ namespace Game.Player
         {
             if (point == null || !point.isActiveAndEnabled) return false;
             if (!enableLedgeGrab) return false;
-            if (IsSwinging || isOverheadRailHanging || isHanging || isDashing || IsSliding || IsDiving || IsCarrying) return false;
+            if (IsSwinging || isOverheadRailHanging || isFlagSpringPoleAttached ||
+                isHanging || isDashing || IsSliding || IsDiving || IsCarrying)
+                return false;
             if (ledgeGrabCooldownTimer > 0f) return false;
             if (IsCrouching || IsLayDown) return false;
             if (suppressWallWhileDownHeld) return false;
@@ -3360,8 +4035,9 @@ namespace Game.Player
             supportHit = default;
             if (capsule == null || !capsule.enabled) return false;
 
+            int standardGroundMask = StandardGroundMask();
             ContactFilter2D filter = new ContactFilter2D();
-            filter.SetLayerMask(SolidMask());
+            filter.SetLayerMask(standardGroundMask | standableActorMask.value);
             filter.useLayerMask = true;
             filter.useTriggers = false;
 
@@ -3376,6 +4052,7 @@ namespace Game.Player
                 RaycastHit2D candidate = groundHits[i];
                 if (candidate.collider == null || candidate.collider == capsule) continue;
                 if (candidate.collider.isTrigger) continue;
+                if (!IsAllowedGroundCollider(candidate.collider, standardGroundMask)) continue;
                 if (candidate.normal.y < groundNormalMinY) continue;
                 if (candidate.normal.y <= bestNormalY) continue;
 
@@ -3643,6 +4320,7 @@ namespace Game.Player
                 isGrounded &&
                 !IsCrouching &&
                 !IsLayDown &&
+                !IsStealthWalking &&
                 !isWallSliding &&
                 !IsMoveLockedByParry &&
                 hasHorizontalRequest &&
@@ -3703,7 +4381,7 @@ namespace Game.Player
 
         private float ApplySprintMomentumTarget(float inputX, float targetSpeed)
         {
-            if (!HasSprintMomentum() || IsCrouching || IsLayDown)
+            if (!HasSprintMomentum() || IsCrouching || IsLayDown || IsStealthWalking)
                 return targetSpeed;
 
             bool opposingInput =
@@ -3768,6 +4446,20 @@ namespace Game.Player
             sprintMomentumDirection = 0;
         }
 
+        private bool IsStealthWalkRequested()
+        {
+            if (input == null)
+                return false;
+            if (input.StealthWalkHeld)
+                return true;
+            if (!input.MoveInputIsGamepad)
+                return false;
+
+            float moveMagnitude = input.MoveMagnitude01;
+            return moveMagnitude > 0f &&
+                   moveMagnitude <= Mathf.Clamp01(analogStealthWalkMaxMagnitude);
+        }
+
         private void Move()
         {
             // Preserve the exact takeoff velocity until the ground probe confirms airborne.
@@ -3775,6 +4467,9 @@ namespace Game.Player
                 return;
 
             float inputX = Mathf.Clamp(input.MoveInput.x, -1f, 1f);
+
+            if (isGrounded)
+                ClearHorizontalAirCurrentMomentum();
 
             if (wallJumpLockTimer > 0f)
             {
@@ -3786,6 +4481,7 @@ namespace Game.Player
             float stanceMult = 1f;
             if (IsLayDown) stanceMult = layDownSpeedMultiplier;
             else if (IsCrouching) stanceMult = crouchSpeedMultiplier;
+            else if (IsStealthWalking) stanceMult = stealthWalkSpeedMultiplier;
             else if (sprintActive) stanceMult = sprintSpeedMultiplier;
             if (IsCarrying) stanceMult *= carryingMoveSpeedMultiplier;
 
@@ -3793,6 +4489,9 @@ namespace Game.Player
             targetSpeed = ApplySprintMomentumTarget(inputX, targetSpeed);
             if (hasPendingNormalJump)
                 targetSpeed *= jumpAnticipationMoveSpeedMultiplier;
+
+            inputX = ApplyHorizontalAirCurrentControl(inputX);
+            targetSpeed = ApplyHorizontalAirCurrentControl(targetSpeed);
 
             float accel = isGrounded ? stats.groundAcceleration : stats.airAcceleration;
             float decel = isGrounded ? stats.groundDeceleration : stats.airDeceleration;
@@ -3864,18 +4563,38 @@ namespace Game.Player
             wasUsingSlopeMovementLastMove = false;
             slopeHorizontalSpeed = 0f;
 
+            float currentVelocityX = HorizontalVelocityWithoutConveyor();
+            targetSpeed = PreserveWithFlowAirCurrentMomentum(
+                currentVelocityX,
+                targetSpeed);
+            bool preserveReleasedAirCurrentVelocity =
+                ApplyReleasedHorizontalAirCurrentMomentum(
+                    currentVelocityX,
+                    targetSpeed,
+                    out bool useAirCurrentMomentumDeceleration);
+            if (useAirCurrentMomentumDeceleration)
+                rate = stats.airDeceleration;
+
             bool changingDirection =
                 Mathf.Abs(targetSpeed) > 0.01f &&
-                Mathf.Sign(targetSpeed) != Mathf.Sign(HorizontalVelocityWithoutConveyor()) &&
-                Mathf.Abs(HorizontalVelocityWithoutConveyor()) > 0.1f;
+                Mathf.Sign(targetSpeed) != Mathf.Sign(currentVelocityX) &&
+                Mathf.Abs(currentVelocityX) > 0.1f;
 
-            if (changingDirection)
+            if (changingDirection && !useAirCurrentMomentumDeceleration)
                 rate *= turnResponsiveness;
 
-            float newVelX = Mathf.MoveTowards(
-                HorizontalVelocityWithoutConveyor(),
-                targetSpeed,
-                rate * Time.fixedDeltaTime);
+            bool preserveAirCurrentMomentum =
+                horizontalAirCurrentInfluence &&
+                CanUseUpdraftCapeMotion &&
+                Mathf.Abs(inputX) < 0.01f &&
+                Mathf.Abs(targetSpeed) < 0.01f;
+            float newVelX = preserveAirCurrentMomentum ||
+                preserveReleasedAirCurrentVelocity
+                ? currentVelocityX
+                : Mathf.MoveTowards(
+                    currentVelocityX,
+                    targetSpeed,
+                    rate * Time.fixedDeltaTime);
 
             if (isGrounded && Mathf.Abs(inputX) < 0.01f && Mathf.Abs(newVelX) < 0.02f)
                 newVelX = 0f;
@@ -3912,6 +4631,8 @@ namespace Game.Player
         private void Jump()
         {
             float jumpForce = GetEffectiveJumpForce() * (IsCarrying ? carryingJumpForceMultiplier : 1f);
+            upwardAirCurrentMomentumProtected = false;
+            downHitBounceAscentProtected = false;
             DetachConveyorForTakeoff();
             slopeMovementSuppressedUntilAirborne = true;
             rb.velocity = new Vector2(rb.velocity.x, jumpForce);
@@ -4045,6 +4766,99 @@ namespace Game.Player
             rb.gravityScale = stats.gravityScale;
         }
 
+        private float ApplyHorizontalAirCurrentControl(float horizontalValue)
+        {
+            if (!horizontalAirCurrentInfluence ||
+                !CanUseUpdraftCapeMotion ||
+                horizontalValue * horizontalAirCurrentDirectionX >= -0.01f)
+            {
+                return horizontalValue;
+            }
+
+            return horizontalValue * horizontalAirCurrentAgainstFlowControl;
+        }
+
+        private float PreserveWithFlowAirCurrentMomentum(
+            float currentVelocityX,
+            float targetVelocityX)
+        {
+            if (!horizontalAirCurrentInfluence || !CanUseUpdraftCapeMotion)
+                return targetVelocityX;
+
+            float currentAlongFlow =
+                currentVelocityX * horizontalAirCurrentDirectionX;
+            float targetAlongFlow =
+                targetVelocityX * horizontalAirCurrentDirectionX;
+            return currentAlongFlow > 0f &&
+                targetAlongFlow >= -0.01f &&
+                currentAlongFlow > targetAlongFlow
+                    ? currentVelocityX
+                    : targetVelocityX;
+        }
+
+        private bool ApplyReleasedHorizontalAirCurrentMomentum(
+            float currentVelocityX,
+            float targetVelocityX,
+            out bool useAirDeceleration)
+        {
+            useAirDeceleration = false;
+            if (!horizontalAirCurrentMomentumActive)
+                return false;
+
+            float currentAlongMomentum =
+                currentVelocityX * horizontalAirCurrentMomentumDirectionX;
+            if (isGrounded || currentAlongMomentum <= 0.01f)
+            {
+                ClearHorizontalAirCurrentMomentum();
+                return false;
+            }
+
+            float targetAlongMomentum =
+                targetVelocityX * horizontalAirCurrentMomentumDirectionX;
+            if (targetAlongMomentum >= currentAlongMomentum - 0.01f)
+            {
+                ClearHorizontalAirCurrentMomentum();
+                return false;
+            }
+
+            // Wind momentum is external to locomotion. Give the handoff one fixed
+            // step with no locomotion write, then bleed only the surplus with the
+            // configured airborne deceleration instead of snapping toward run speed.
+            useAirDeceleration = true;
+            if (horizontalAirCurrentMomentumGraceFixedSteps <= 0)
+                return false;
+
+            horizontalAirCurrentMomentumGraceFixedSteps--;
+            return true;
+        }
+
+        private void CaptureHorizontalAirCurrentMomentum()
+        {
+            if (rb == null || isGrounded)
+            {
+                ClearHorizontalAirCurrentMomentum();
+                return;
+            }
+
+            float velocityX = HorizontalVelocityWithoutConveyor();
+            if (Mathf.Abs(velocityX) <= 0.01f)
+            {
+                ClearHorizontalAirCurrentMomentum();
+                return;
+            }
+
+            horizontalAirCurrentMomentumActive = true;
+            horizontalAirCurrentMomentumDirectionX = Mathf.Sign(velocityX);
+            horizontalAirCurrentMomentumGraceFixedSteps = 1;
+        }
+
+        private void ClearHorizontalAirCurrentMomentum()
+        {
+            horizontalAirCurrentMomentumActive = false;
+            horizontalAirCurrentMomentumDirectionX = 0f;
+            horizontalAirCurrentMomentumGraceFixedSteps = 0;
+        }
+
         // --------------------
         // DASH
         // --------------------
@@ -4156,6 +4970,7 @@ namespace Game.Player
             return
                 isGrounded &&
                 currentGroundPlatform == null &&
+                currentGroundStandableSurface == null &&
                 currentGroundConveyor == null &&
                 currentGroundWoodWorkpiece == null &&
                 IsValidDashSlopeNormal(normal);
@@ -4439,6 +5254,8 @@ namespace Game.Player
             if (IsSameWallClimbBlocked(jumpedWallSide, jumpedWallCollider)) return;
 
             ClearSprintMomentum();
+            upwardAirCurrentMomentumProtected = false;
+            downHitBounceAscentProtected = false;
 
             float jumpMult = IsCarrying ? carryingJumpForceMultiplier : 1f;
             float wallJumpForceX = stats.wallJumpForceX;
@@ -4475,12 +5292,15 @@ namespace Game.Player
                 groundNormal = Vector2.up;
                 currentGroundCollider = null;
                 currentGroundPlatform = null;
+                currentGroundStandableSurface = null;
+                idleAnchorStandableSurface = null;
                 UpdateGroundConveyor(null, null);
                 slopeMovementSuppressedUntilAirborne = false;
                 return;
             }
 
-            int mask = groundLayer.value != 0 ? groundLayer.value : SolidMask();
+            int standardGroundMask = StandardGroundMask();
+            int mask = standardGroundMask | standableActorMask.value;
             Vector2 size = new Vector2(
                 Mathf.Max(0.01f, groundCheckBoxSize.x),
                 Mathf.Max(0.01f, groundCheckBoxSize.y)
@@ -4505,6 +5325,7 @@ namespace Game.Player
                 RaycastHit2D candidate = groundHits[i];
                 if (candidate.collider == null) continue;
                 if (candidate.collider.isTrigger) continue;
+                if (!IsAllowedGroundCollider(candidate.collider, standardGroundMask)) continue;
                 if (candidate.normal.y < groundNormalMinY) continue;
                 if (candidate.normal.y <= bestNormalY) continue;
 
@@ -4523,6 +5344,9 @@ namespace Game.Player
 
             currentGroundPlatform = isGrounded
                 ? bestHit.collider.GetComponentInParent<HorizontalMovingPlatform>()
+                : null;
+            currentGroundStandableSurface = isGrounded
+                ? GetAcceptedStandableSurface(bestHit.collider)
                 : null;
             ConveyorBelt detectedConveyor = isGrounded
                 ? bestHit.collider.GetComponentInParent<ConveyorBelt>()
@@ -4549,6 +5373,7 @@ namespace Game.Player
                 groundNormal.y < SlopeNormalMaxY &&
                 !slopeMovementSuppressedUntilAirborne &&
                 currentGroundPlatform == null &&
+                currentGroundStandableSurface == null &&
                 currentGroundConveyor == null &&
                 currentGroundWoodWorkpiece == null;
         }
@@ -4631,13 +5456,207 @@ namespace Game.Player
 
         private void ApplyMovingPlatformDelta()
         {
-            if (!isGrounded || currentGroundPlatform == null) return;
+            StabilizeIdleStandableSurface();
+            if (!isGrounded) return;
 
-            Vector2 delta = currentGroundPlatform.LastDelta;
+            Vector2 delta;
+            if (currentGroundPlatform != null)
+                delta = currentGroundPlatform.LastDelta;
+            else if (currentGroundStandableSurface != null)
+                delta = currentGroundStandableSurface.LastDelta;
+            else
+                return;
+
             if (delta.sqrMagnitude <= 0f) return;
 
             rb.position += delta;
             transform.position = rb.position;
+        }
+
+        private void StabilizeIdleStandableSurface()
+        {
+            if (!CanStabilizeIdleStandableSurface())
+            {
+                idleAnchorStandableSurface = null;
+                return;
+            }
+
+            if (idleAnchorStandableSurface != currentGroundStandableSurface)
+            {
+                idleAnchorStandableSurface = currentGroundStandableSurface;
+                idleStandableOffsetX = rb.position.x - currentGroundStandableSurface.transform.position.x;
+                return;
+            }
+
+            float targetX = currentGroundStandableSurface.transform.position.x + idleStandableOffsetX;
+            float correctedX = Mathf.MoveTowards(
+                rb.position.x,
+                targetX,
+                standableDriftCorrectionSpeed * Time.fixedDeltaTime);
+            rb.position = new Vector2(correctedX, rb.position.y);
+            transform.position = rb.position;
+
+            // Standable actors are carried once by LastDelta below. Keeping the
+            // controller's own world-X velocity at zero therefore means zero
+            // relative velocity without adding the support velocity a second time.
+            rb.velocity = new Vector2(0f, rb.velocity.y);
+        }
+
+        private bool CanStabilizeIdleStandableSurface()
+        {
+            if (!isGrounded || currentGroundStandableSurface == null || input == null)
+                return false;
+            if (Mathf.Abs(input.MoveInput.x) > standableIdleInputThreshold)
+                return false;
+            if (isDashing || isWallSliding || IsSliding || IsDiving || IsPostDiveSliding ||
+                hasPendingNormalJump || IsSwinging || isHanging || isOverheadRailHanging)
+                return false;
+            if (HasSprintMomentum() || horizontalAirCurrentMomentumActive)
+                return false;
+
+            return true;
+        }
+
+        private void ReleaseCurrentStandableSupport(
+            Game.Combat.IPlayerAttackReceiver expectedReceiver,
+            bool waitForHorizontalSeparation)
+        {
+            if (currentGroundStandableSurface == null || expectedReceiver == null)
+                return;
+
+            var supportReceiver =
+                currentGroundStandableSurface.GetComponent<Game.Combat.IPlayerAttackReceiver>() ??
+                currentGroundStandableSurface.GetComponentInParent<Game.Combat.IPlayerAttackReceiver>();
+            if (!ReferenceEquals(supportReceiver, expectedReceiver))
+                return;
+
+            ReleaseCurrentStandableSupport(waitForHorizontalSeparation);
+        }
+
+        private bool IsHitCurrentStandableSupport(
+            Collider2D hitCollider,
+            Component damageTarget)
+        {
+            if (currentGroundStandableSurface == null)
+                return false;
+
+            PlayerStandableSurface hitSurface = hitCollider != null
+                ? hitCollider.GetComponentInParent<PlayerStandableSurface>()
+                : null;
+            if (hitSurface == null && damageTarget != null)
+            {
+                hitSurface = damageTarget.GetComponent<PlayerStandableSurface>() ??
+                             damageTarget.GetComponentInParent<PlayerStandableSurface>();
+            }
+
+            return hitSurface == currentGroundStandableSurface;
+        }
+
+        private void ReleaseCurrentStandableSupport(bool waitForHorizontalSeparation)
+        {
+            if (currentGroundStandableSurface == null)
+                return;
+
+            ignoredStandableSurface = currentGroundStandableSurface;
+            ignoredStandableMinimumTimer = releasedSupportIgnoreDuration;
+            ignoredStandableTimer = waitForHorizontalSeparation
+                ? Mathf.Max(
+                    releasedSupportIgnoreDuration,
+                    tankDownHitSupportIgnoreMaxDuration)
+                : releasedSupportIgnoreDuration;
+            ignoredStandableWaitForHorizontalSeparation = waitForHorizontalSeparation;
+            idleAnchorStandableSurface = null;
+            idleStandableOffsetX = 0f;
+            isGrounded = false;
+            groundNormal = Vector2.up;
+            currentGroundCollider = null;
+            currentGroundPlatform = null;
+            currentGroundStandableSurface = null;
+            slopeMovementSuppressedUntilAirborne = false;
+            UpdateGroundConveyor(null, null);
+        }
+
+        private void UpdateIgnoredStandableTimer(float deltaTime)
+        {
+            if (ignoredStandableSurface == null)
+            {
+                ClearIgnoredStandableSurface();
+                return;
+            }
+
+            float elapsed = Mathf.Max(0f, deltaTime);
+            ignoredStandableTimer = Mathf.Max(0f, ignoredStandableTimer - elapsed);
+            ignoredStandableMinimumTimer = Mathf.Max(
+                0f,
+                ignoredStandableMinimumTimer - elapsed);
+            if (ignoredStandableTimer <= 0f)
+            {
+                ClearIgnoredStandableSurface();
+                return;
+            }
+
+            if (ignoredStandableMinimumTimer > 0f)
+                return;
+
+            if (!ignoredStandableWaitForHorizontalSeparation ||
+                !HasHorizontalOverlapWithIgnoredStandableSurface())
+            {
+                ClearIgnoredStandableSurface();
+            }
+        }
+
+        private bool HasHorizontalOverlapWithIgnoredStandableSurface()
+        {
+            if (capsule == null || !capsule.enabled || ignoredStandableSurface == null)
+                return false;
+
+            Collider2D supportCollider = ignoredStandableSurface.SurfaceCollider;
+            if (supportCollider == null || !supportCollider.enabled)
+                return false;
+
+            Bounds playerBounds = capsule.bounds;
+            Bounds supportBounds = supportCollider.bounds;
+            float horizontalOverlap =
+                Mathf.Min(playerBounds.max.x, supportBounds.max.x) -
+                Mathf.Max(playerBounds.min.x, supportBounds.min.x);
+            return horizontalOverlap > 0.01f;
+        }
+
+        private void ClearIgnoredStandableSurface()
+        {
+            ignoredStandableSurface = null;
+            ignoredStandableTimer = 0f;
+            ignoredStandableMinimumTimer = 0f;
+            ignoredStandableWaitForHorizontalSeparation = false;
+        }
+
+        private bool IsAllowedGroundCollider(Collider2D candidate, int standardGroundMask)
+        {
+            int candidateLayer = 1 << candidate.gameObject.layer;
+            if ((standardGroundMask & candidateLayer) != 0)
+                return true;
+
+            if ((standableActorMask.value & candidateLayer) == 0)
+                return false;
+
+            PlayerStandableSurface surface = GetAcceptedStandableSurface(candidate);
+            return surface != null &&
+                   (ignoredStandableTimer <= 0f || surface != ignoredStandableSurface);
+        }
+
+        private int StandardGroundMask()
+        {
+            return groundLayer.value != 0 ? groundLayer.value : SolidMask();
+        }
+
+        private static PlayerStandableSurface GetAcceptedStandableSurface(Collider2D candidate)
+        {
+            if (candidate == null)
+                return null;
+
+            PlayerStandableSurface surface =
+                candidate.GetComponentInParent<PlayerStandableSurface>();
+            return surface != null && surface.Accepts(candidate) ? surface : null;
         }
 
         private void UpdateRecentlyGroundedTimer(float deltaTime)
@@ -5222,7 +6241,6 @@ namespace Game.Player
                 SetLedgeDebugFail("topGround normal invalid");
                 return false;
             }
-
             float verticalDelta = topGround.point.y - handsOrigin.y;
             if (Mathf.Abs(verticalDelta) > ledgeHandsFromTop + ledgeVerticalTolerance + ledgeHeadClearance)
             {

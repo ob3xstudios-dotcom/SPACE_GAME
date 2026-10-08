@@ -36,10 +36,13 @@ namespace Game.Input
         }
 
         public Vector2 MoveInput { get; private set; }
+        public float MoveMagnitude01 => Mathf.Clamp01(MoveInput.magnitude);
 
         public bool JumpHeld { get; private set; }
         public bool SprintHeld { get; private set; }
         public bool CapeHeld { get; private set; }
+        public bool StealthWalkHeld { get; private set; }
+        public bool MoveInputIsGamepad { get; private set; }
         public bool CrouchHeld => crouchHeld;
         public PlayerPosture CurrentPosture => posture;
         public bool IsCrouching => posture == PlayerPosture.Crouching;
@@ -98,6 +101,8 @@ namespace Game.Input
             actions.Gameplay.Jump.canceled += OnJumpCanceled;
             actions.Gameplay.Sprint.started += OnSprintStarted;
             actions.Gameplay.Sprint.canceled += OnSprintCanceled;
+            actions.Gameplay.StealthWalk.started += OnStealthWalkStarted;
+            actions.Gameplay.StealthWalk.canceled += OnStealthWalkCanceled;
             actions.Gameplay.Cape.started += OnCapeStarted;
             actions.Gameplay.Cape.canceled += OnCapeCanceled;
 
@@ -125,9 +130,11 @@ namespace Game.Input
         private void OnDisable()
         {
             ResetCrouchPressTracking();
+            ResetStealthWalkHeld();
             ClearSwingGrabBuffer();
             SprintHeld = false;
             CapeHeld = false;
+            MoveInputIsGamepad = false;
             mapPressed = false;
             skillsPressed = false;
 
@@ -140,6 +147,8 @@ namespace Game.Input
             actions.Gameplay.Jump.canceled -= OnJumpCanceled;
             actions.Gameplay.Sprint.started -= OnSprintStarted;
             actions.Gameplay.Sprint.canceled -= OnSprintCanceled;
+            actions.Gameplay.StealthWalk.started -= OnStealthWalkStarted;
+            actions.Gameplay.StealthWalk.canceled -= OnStealthWalkCanceled;
             actions.Gameplay.Cape.started -= OnCapeStarted;
             actions.Gameplay.Cape.canceled -= OnCapeCanceled;
 
@@ -507,6 +516,11 @@ namespace Game.Input
             activeCrouchControlPath = "<none>";
         }
 
+        public void ResetStealthWalkHeld()
+        {
+            StealthWalkHeld = false;
+        }
+
         private void LogCrouchDiagnostic(
             string eventName,
             string controlPath = null,
@@ -543,11 +557,13 @@ namespace Game.Input
         private void OnMovePerformed(InputAction.CallbackContext ctx)
         {
             MoveInput = ctx.ReadValue<Vector2>();
+            MoveInputIsGamepad = ctx.control != null && ctx.control.device is Gamepad;
         }
 
         private void OnMoveCanceled(InputAction.CallbackContext ctx)
         {
             MoveInput = Vector2.zero;
+            MoveInputIsGamepad = false;
         }
 
         private void OnJumpStarted(InputAction.CallbackContext ctx)
@@ -575,6 +591,16 @@ namespace Game.Input
             SprintHeld = false;
 
             if (debugInput) Debug.Log("[INPUT] SPRINT canceled");
+        }
+
+        private void OnStealthWalkStarted(InputAction.CallbackContext ctx)
+        {
+            StealthWalkHeld = true;
+        }
+
+        private void OnStealthWalkCanceled(InputAction.CallbackContext ctx)
+        {
+            StealthWalkHeld = false;
         }
 
         private void OnCapeStarted(InputAction.CallbackContext ctx)

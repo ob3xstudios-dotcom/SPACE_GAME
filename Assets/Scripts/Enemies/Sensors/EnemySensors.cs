@@ -14,9 +14,6 @@ namespace Game.Enemies
         [SerializeField] private LayerMask playerLayer;
         [SerializeField] private LayerMask obstacleLayer;
 
-        [Header("Stealth Vision")]
-        [SerializeField, Range(0.1f, 1f)] private float stealthViewDistanceMultiplier = 1.0f;
-
         [Header("Hearing")]
         [SerializeField, Range(0.5f, 30f)] private float hearingDistance = 5f;
         [SerializeField, Min(0f)] private float hearingSpeedThreshold = 6f;
@@ -30,17 +27,21 @@ namespace Game.Enemies
 
         private EnemyBase enemy;
         private Game.Player.PlayerController cachedPlayerController;
+        private Game.Player.StealthDebugIndicator cachedStealthDebugIndicator;
         private Rigidbody2D cachedPlayerRb;
         private const float VisionRayEpsilon = 0.02f;
 
         private bool hasLineOfSight;
+        private bool hasVisualLineOfSight;
         private float lastSeenTime = -999f;
         private Vector2 lastKnownPlayerPos;
+        private int externalFacingDirection = 1;
 
         public Transform Player => player;
         public float ViewDistance => viewDistance;
         public float LoseDistance => viewDistance * loseDistanceMultiplier;
         public bool HasLineOfSight => hasLineOfSight;
+        public bool HasVisualLineOfSight => hasVisualLineOfSight;
         public Vector2 LastKnownPlayerPos => lastKnownPlayerPos;
         public float AttackRangeX => attackRangeX;
         public float AttackRangeY => attackRangeY;
@@ -71,6 +72,13 @@ namespace Game.Enemies
                     player.GetComponent<Rigidbody2D>() ??
                     player.GetComponentInChildren<Rigidbody2D>(true);
             }
+
+            if (player != null && cachedStealthDebugIndicator == null)
+            {
+                cachedStealthDebugIndicator =
+                    player.GetComponent<Game.Player.StealthDebugIndicator>() ??
+                    player.GetComponentInChildren<Game.Player.StealthDebugIndicator>(true);
+            }
         }
 
         public void TickVision(Vector2 origin)
@@ -80,12 +88,14 @@ namespace Game.Enemies
             if (player == null)
             {
                 hasLineOfSight = false;
+                hasVisualLineOfSight = false;
                 return;
             }
 
             if (!IsPlayerOnLayer())
             {
                 hasLineOfSight = false;
+                hasVisualLineOfSight = false;
                 return;
             }
 
@@ -97,6 +107,10 @@ namespace Game.Enemies
             bool canSee = CanSeePlayerByVision(enemyCenter, toPlayer, dist);
             bool canHear = CanHearPlayer(enemyCenter, toPlayer, dist);
 
+            if (canSee)
+                cachedStealthDebugIndicator?.ReportVisualDetection();
+
+            hasVisualLineOfSight = canSee;
             hasLineOfSight = canSee || canHear;
 
             if (hasLineOfSight)
@@ -108,16 +122,17 @@ namespace Game.Enemies
 
         private bool CanSeePlayerByVision(Vector2 enemyCenter, Vector2 toPlayer, float dist)
         {
-            bool playerStealthed = IsPlayerStealthed();
-            float effectiveViewDistance = viewDistance * (playerStealthed ? stealthViewDistanceMultiplier : 1f);
-
-            if (dist > effectiveViewDistance)
+            if (dist > viewDistance)
                 return false;
 
             if (dist <= 0.001f)
                 return true;
 
-            Vector2 forward = enemy != null ? enemy.Forward : Vector2.right;
+            Vector2 forward = enemy != null
+                ? enemy.Forward
+                : externalFacingDirection < 0
+                    ? Vector2.left
+                    : Vector2.right;
             Vector2 dirToPlayer = toPlayer / dist;
 
             if (Vector2.Dot(forward, dirToPlayer) <= 0f)
@@ -128,14 +143,40 @@ namespace Game.Enemies
 
         private bool CanHearPlayer(Vector2 enemyCenter, Vector2 toPlayer, float dist)
         {
-            if (IsPlayerStealthed()) return false;
+            return CanHearPlayer(enemyCenter, toPlayer, dist, hearingDistance);
+        }
+
+        private bool CanHearPlayer(
+            Vector2 enemyCenter,
+            Vector2 toPlayer,
+            float dist,
+            float maximumDistance)
+        {
+            if (IsPlayerSilentForHearing()) return false;
             if (cachedPlayerRb == null) return false;
-            if (dist > hearingDistance) return false;
+            if (dist > maximumDistance) return false;
             if (cachedPlayerRb.velocity.magnitude < hearingSpeedThreshold) return false;
             if (dist <= 0.001f) return true;
 
             Vector2 dirToPlayer = toPlayer / dist;
             return !IsBlockedByObstacle(enemyCenter, dirToPlayer, dist);
+        }
+
+        public bool CanHearPlayer(Vector2 origin, float maximumDistance)
+        {
+            ResolvePlayer();
+            if (player == null || !IsPlayerOnLayer())
+                return false;
+
+            Vector2 enemyCenter = GetCenter(gameObject, origin);
+            Vector2 playerCenter = GetCenter(player.gameObject, (Vector2)player.position);
+            Vector2 toPlayer = playerCenter - enemyCenter;
+            float distance = toPlayer.magnitude;
+            return CanHearPlayer(
+                enemyCenter,
+                toPlayer,
+                distance,
+                Mathf.Max(0f, maximumDistance));
         }
 
         private bool IsBlockedByObstacle(Vector2 origin, Vector2 dir, float dist)
@@ -169,6 +210,12 @@ namespace Game.Enemies
             return LayerMask.GetMask("Ground", "Wall");
         }
 
+        public void SetExternalFacingDirection(int direction)
+        {
+            if (enemy == null && direction != 0)
+                externalFacingDirection = direction < 0 ? -1 : 1;
+        }
+
         public bool IsPlayerInAttackRange(Vector2 origin)
         {
             ResolvePlayer();
@@ -191,10 +238,10 @@ namespace Game.Enemies
             return Vector2.Distance(enemyCenter, playerCenter);
         }
 
-        private bool IsPlayerStealthed()
+        private bool IsPlayerSilentForHearing()
         {
             if (cachedPlayerController == null) return false;
-            return cachedPlayerController.IsCrouching || cachedPlayerController.IsLayDown;
+            return cachedPlayerController.IsSilentForEnemyHearing;
         }
 
         private bool IsPlayerCollider(Collider2D col)

@@ -167,6 +167,15 @@ namespace Game.Input
                     ""initialStateCheck"": false
                 },
                 {
+                    ""name"": ""StealthWalk"",
+                    ""type"": ""Button"",
+                    ""id"": ""5bf5d7af-c31c-4a40-a2ce-bd2bbc85bc2e"",
+                    ""expectedControlType"": """",
+                    ""processors"": """",
+                    ""interactions"": """",
+                    ""initialStateCheck"": false
+                },
+                {
                     ""name"": ""SwingGrab"",
                     ""type"": ""Button"",
                     ""id"": ""36853191-9274-4461-8dc8-f33365ffb3cf"",
@@ -514,6 +523,17 @@ namespace Game.Input
                 },
                 {
                     ""name"": """",
+                    ""id"": ""9c9d1aed-b853-4b89-9cc2-de50f88b58af"",
+                    ""path"": ""<Keyboard>/leftAlt"",
+                    ""interactions"": """",
+                    ""processors"": """",
+                    ""groups"": """",
+                    ""action"": ""StealthWalk"",
+                    ""isComposite"": false,
+                    ""isPartOfComposite"": false
+                },
+                {
+                    ""name"": """",
                     ""id"": ""111e129d-f112-4f58-9ba1-b554a71f28a4"",
                     ""path"": ""<Keyboard>/m"",
                     ""interactions"": """",
@@ -593,6 +613,7 @@ namespace Game.Input
             m_Gameplay_Interact = m_Gameplay.FindAction("Interact", throwIfNotFound: true);
             m_Gameplay_Parry = m_Gameplay.FindAction("Parry", throwIfNotFound: true);
             m_Gameplay_Crouch = m_Gameplay.FindAction("Crouch", throwIfNotFound: true);
+            m_Gameplay_StealthWalk = m_Gameplay.FindAction("StealthWalk", throwIfNotFound: true);
             m_Gameplay_SwingGrab = m_Gameplay.FindAction("SwingGrab", throwIfNotFound: true);
             m_Gameplay_Map = m_Gameplay.FindAction("Map", throwIfNotFound: true);
             m_Gameplay_Skills = m_Gameplay.FindAction("Skills", throwIfNotFound: true);
@@ -685,6 +706,7 @@ namespace Game.Input
         private readonly InputAction m_Gameplay_Interact;
         private readonly InputAction m_Gameplay_Parry;
         private readonly InputAction m_Gameplay_Crouch;
+        private readonly InputAction m_Gameplay_StealthWalk;
         private readonly InputAction m_Gameplay_SwingGrab;
         private readonly InputAction m_Gameplay_Map;
         private readonly InputAction m_Gameplay_Skills;
@@ -732,6 +754,10 @@ namespace Game.Input
             /// Provides access to the underlying input action "Gameplay/Crouch".
             /// </summary>
             public InputAction @Crouch => m_Wrapper.m_Gameplay_Crouch;
+            /// <summary>
+            /// Provides access to the underlying input action "Gameplay/StealthWalk".
+            /// </summary>
+            public InputAction @StealthWalk => m_Wrapper.m_Gameplay_StealthWalk;
             /// <summary>
             /// Provides access to the underlying input action "Gameplay/SwingGrab".
             /// </summary>
@@ -798,6 +824,9 @@ namespace Game.Input
                 @Crouch.started += instance.OnCrouch;
                 @Crouch.performed += instance.OnCrouch;
                 @Crouch.canceled += instance.OnCrouch;
+                @StealthWalk.started += instance.OnStealthWalk;
+                @StealthWalk.performed += instance.OnStealthWalk;
+                @StealthWalk.canceled += instance.OnStealthWalk;
                 @SwingGrab.started += instance.OnSwingGrab;
                 @SwingGrab.performed += instance.OnSwingGrab;
                 @SwingGrab.canceled += instance.OnSwingGrab;
@@ -845,6 +874,9 @@ namespace Game.Input
                 @Crouch.started -= instance.OnCrouch;
                 @Crouch.performed -= instance.OnCrouch;
                 @Crouch.canceled -= instance.OnCrouch;
+                @StealthWalk.started -= instance.OnStealthWalk;
+                @StealthWalk.performed -= instance.OnStealthWalk;
+                @StealthWalk.canceled -= instance.OnStealthWalk;
                 @SwingGrab.started -= instance.OnSwingGrab;
                 @SwingGrab.performed -= instance.OnSwingGrab;
                 @SwingGrab.canceled -= instance.OnSwingGrab;
@@ -953,6 +985,13 @@ namespace Game.Input
             /// <seealso cref="UnityEngine.InputSystem.InputAction.performed" />
             /// <seealso cref="UnityEngine.InputSystem.InputAction.canceled" />
             void OnCrouch(InputAction.CallbackContext context);
+            /// <summary>
+            /// Method invoked when associated input action "StealthWalk" is either <see cref="UnityEngine.InputSystem.InputAction.started" />, <see cref="UnityEngine.InputSystem.InputAction.performed" /> or <see cref="UnityEngine.InputSystem.InputAction.canceled" />.
+            /// </summary>
+            /// <seealso cref="UnityEngine.InputSystem.InputAction.started" />
+            /// <seealso cref="UnityEngine.InputSystem.InputAction.performed" />
+            /// <seealso cref="UnityEngine.InputSystem.InputAction.canceled" />
+            void OnStealthWalk(InputAction.CallbackContext context);
             /// <summary>
             /// Method invoked when associated input action "SwingGrab" is either <see cref="UnityEngine.InputSystem.InputAction.started" />, <see cref="UnityEngine.InputSystem.InputAction.performed" /> or <see cref="UnityEngine.InputSystem.InputAction.canceled" />.
             /// </summary>

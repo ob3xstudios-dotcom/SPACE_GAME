@@ -17,6 +17,9 @@ namespace Game.Player
         [SerializeField] private string wallSlidingParam = "WallSliding";
         [SerializeField] private string wallSlideEdgeParam = "WallSlideEdge";
         [SerializeField] private string wallSideParam = "WallSide";
+        [Tooltip("Optional hook. It is only written when the Animator defines this bool.")]
+        [SerializeField] private string overheadRailStealthHangingParam =
+            "OverheadRailStealthHanging";
 
         [Header("Jump Params")]
         [SerializeField] private string jumpStartTrigger = "JumpStart";
@@ -60,12 +63,14 @@ namespace Game.Player
 
         private int speedHash, runAnimSpeedHash, groundedHash, vyHash, hangingHash, swingingHash;
         private int wallSlidingHash, wallSlideEdgeHash, wallSideHash;
+        private int overheadRailStealthHangingHash;
         private int jumpStartHash, jumpEndHash, wallImpactHash, wallJumpStartHash;
         private int attackTrigHash, attackDirHash;
         private int parryTrigHash;
         private int crouchHash, layDownHash, slidingHash, divingHash;
         private bool hasWallSlidingParam, hasWallSlideEdgeParam, hasWallSideParam, hasJumpStartParam, hasJumpEndParam;
         private bool hasWallImpactParam, hasWallJumpStartParam;
+        private bool hasOverheadRailStealthHangingParam;
         private bool hasGroundedSample, wasGrounded, wasTouchingWall, wasWallSliding;
         private bool wasDiving;
         private bool wallSlideEdgeLatched;
@@ -88,6 +93,8 @@ namespace Game.Player
             wallSlidingHash = Animator.StringToHash(wallSlidingParam);
             wallSlideEdgeHash = Animator.StringToHash(wallSlideEdgeParam);
             wallSideHash = Animator.StringToHash(wallSideParam);
+            overheadRailStealthHangingHash =
+                Animator.StringToHash(overheadRailStealthHangingParam);
             jumpStartHash = Animator.StringToHash(jumpStartTrigger);
             jumpEndHash = Animator.StringToHash(jumpEndTrigger);
             wallImpactHash = Animator.StringToHash(wallImpactTrigger);
@@ -110,6 +117,9 @@ namespace Game.Player
             hasJumpEndParam = HasAnimatorParameter(jumpEndHash, AnimatorControllerParameterType.Trigger);
             hasWallImpactParam = HasAnimatorParameter(wallImpactHash, AnimatorControllerParameterType.Trigger);
             hasWallJumpStartParam = HasAnimatorParameter(wallJumpStartHash, AnimatorControllerParameterType.Trigger);
+            hasOverheadRailStealthHangingParam = HasAnimatorParameter(
+                overheadRailStealthHangingHash,
+                AnimatorControllerParameterType.Bool);
         }
 
         private void Update()
@@ -144,6 +154,12 @@ namespace Game.Player
             anim.SetBool(swingingHash, isSwinging);
             anim.SetBool(slidingHash, isSliding);
             anim.SetBool(divingHash, isDiving);
+            if (hasOverheadRailStealthHangingParam)
+            {
+                anim.SetBool(
+                    overheadRailStealthHangingHash,
+                    controller != null && controller.IsOverheadRailStealthHanging);
+            }
             if (hasGroundedSample && !wasGrounded && isGrounded &&
                 !isDiving && !wasDiving &&
                 (controller == null || !controller.IsNormalJumpAnticipating))

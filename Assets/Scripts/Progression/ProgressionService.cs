@@ -512,7 +512,7 @@ namespace Game.Progression
                 PlayerUpdraftCape cape = player.GetComponent<PlayerUpdraftCape>();
                 if (cape == null)
                     cape = player.gameObject.AddComponent<PlayerUpdraftCape>();
-                cape.Bind(player, this);
+                cape.Bind(player);
                 return;
             }
         }

@@ -91,10 +91,15 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: b2121802064741a4ae99e7efeeddb8be, type: 3}
   m_Name:
   m_EditorClassIdentifier:
-  liftAcceleration: 18
-  maxRiseSpeed: 7
+  flowDirection: 0
+  flowAcceleration: 30
+  maxFlowSpeed: 14
   strengthMultiplier: 1
-  topHoverInset: 0.35
+  againstFlowControl: 0
+  withFlowAccelerationMultiplier: 2.5
+  withFlowMaxSpeedMultiplier: 1.75
+  endBehavior: 1
+  endHoldInset: 0.35
   hoverTolerance: 0.08
   hoverCorrectionSpeed: 2
   hoverStrength: 30
@@ -145,10 +150,11 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 72ec8dc159c44b149f8b5cf4e89657cd, type: 3}
   m_Name:
   m_EditorClassIdentifier:
+  sourceZone: {fileID: 8203000000000004}
   sourceCollider: {fileID: 8203000000000003}
   visualEnabled: 1
   streamCount: 14
-  riseSpeed: 1.8
+  flowSpeed: 1.8
   segmentLength: 0.38
   lineWidth: 0.035
   streamColor: {r: 0.25, g: 0.9, b: 1, a: 0.32}

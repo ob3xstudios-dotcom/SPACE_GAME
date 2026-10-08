@@ -22,6 +22,8 @@ namespace Game.Combat
         [Header("Feedback - Knockback")]
         [SerializeField] private float knockbackSpeedX = 8f;   // seco
         [SerializeField] private float knockbackSpeedY = 1.5f; // un pelín arriba
+        [Tooltip("Permite que un controlador especializado aplique su propio knockback y stun.")]
+        [SerializeField] private bool useExternalHitReaction;
 
         [Header("Knockback - Force Unfreeze (si estaba congelado)")]
         [Tooltip("Si algún state congela al enemy (FreezeAll / Kinematic), esto lo libera para que se vea el knockback.")]
@@ -51,6 +53,7 @@ namespace Game.Combat
         [Header("Debug")]
         [SerializeField] private bool debugLogs = false;
 
+        public event Action<Health, int, Vector2> OnDamaged;
         public event Action<Health> OnDied; // opcional (para quien quiera escuchar sin SO)
 
         private Rigidbody2D rb2d;
@@ -102,7 +105,11 @@ namespace Game.Combat
             if (debugLogs)
                 Debug.Log($"[HIT] {name} {before}->{CurrentHP}/{maxHP} (-{dmg}) from={attackerPosition}");
 
-            ApplyKnockback(attackerPosition);
+            Vector2 sourcePosition = attackerPosition;
+            OnDamaged?.Invoke(this, dmg, sourcePosition);
+
+            if (!useExternalHitReaction)
+                ApplyKnockback(attackerPosition);
 
             if (blinkOnHit)
                 StartBlink(blinkDuration);

@@ -79,6 +79,15 @@
                     "initialStateCheck": false
                 },
                 {
+                    "name": "StealthWalk",
+                    "type": "Button",
+                    "id": "5bf5d7af-c31c-4a40-a2ce-bd2bbc85bc2e",
+                    "expectedControlType": "",
+                    "processors": "",
+                    "interactions": "",
+                    "initialStateCheck": false
+                },
+                {
                     "name": "SwingGrab",
                     "type": "Button",
                     "id": "36853191-9274-4461-8dc8-f33365ffb3cf",
@@ -421,6 +430,17 @@
                     "processors": "",
                     "groups": "",
                     "action": "Crouch",
+                    "isComposite": false,
+                    "isPartOfComposite": false
+                },
+                {
+                    "name": "",
+                    "id": "9c9d1aed-b853-4b89-9cc2-de50f88b58af",
+                    "path": "<Keyboard>/leftAlt",
+                    "interactions": "",
+                    "processors": "",
+                    "groups": "",
+                    "action": "StealthWalk",
                     "isComposite": false,
                     "isPartOfComposite": false
                 },
