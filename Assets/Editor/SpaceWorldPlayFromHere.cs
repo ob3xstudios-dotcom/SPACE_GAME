@@ -27,6 +27,9 @@ namespace Game.EditorTools
         private const string TargetY = Key + "TargetY";
         private const string TargetZ = Key + "TargetZ";
         private const string EnteredPlay = Key + "EnteredPlay";
+        private const string ReturnMenuPath = "SpaceWorld/Play From Here/Return To Set Point _F8";
+        private const string PlayerControllerTypeName = "Game.Player.PlayerController";
+        private const double ReturnDebounceSeconds = 0.15;
 
         // Unity 2022.3 has this internal Editor API, but no public scene-dirty clear API.
         // Resolve it before moving anything and only invoke it after a verified restore.
@@ -38,6 +41,7 @@ namespace Game.EditorTools
         private static string armedScene;
         private static float armedZ;
         private static bool abortedRestoreAttempted;
+        private static double lastReturnToSetPointTime = double.NegativeInfinity;
 
         static SpaceWorldPlayFromHere()
         {
@@ -164,6 +168,75 @@ namespace Game.EditorTools
             }
         }
 
+        [MenuItem(ReturnMenuPath)]
+        private static void ReturnToSetPoint()
+        {
+            if (!EditorApplication.isPlaying)
+            {
+                Warn("Return To Set Point is only available in Play Mode.");
+                return;
+            }
+
+            double now = EditorApplication.timeSinceStartup;
+            if (now - lastReturnToSetPointTime < ReturnDebounceSeconds)
+                return;
+
+            lastReturnToSetPointTime = now;
+
+            Scene scene = SceneManager.GetActiveScene();
+            if (!scene.IsValid() || !scene.isLoaded || string.IsNullOrEmpty(scene.path))
+            {
+                Warn("The active Play Mode scene must be loaded and saved.");
+                return;
+            }
+
+            string pointScene = SessionState.GetString(PointScene, "");
+            if (string.IsNullOrEmpty(pointScene))
+            {
+                Warn("No Set Point exists. Leave Play Mode and use Set Point first.");
+                return;
+            }
+            if (pointScene != scene.path)
+            {
+                Warn("The Set Point belongs to a different scene; the Player was not moved.");
+                return;
+            }
+
+            GameObject player = FindSinglePlayer(scene);
+            if (player == null)
+            {
+                Warn("The active scene needs exactly one active tagged Player; the Player was not moved.");
+                return;
+            }
+
+            Rigidbody2D body = player.GetComponent<Rigidbody2D>();
+            if (body == null)
+            {
+                Warn("The active tagged Player needs a Rigidbody2D on its root object; the Player was not moved.");
+                return;
+            }
+
+            string resetFailure;
+            if (!TryResetPlayerTransientState(player, out resetFailure))
+            {
+                Warn(resetFailure + " The Player was not moved.");
+                return;
+            }
+
+            Vector3 target = GetVector(PointX, PointY, PointZ);
+            body.velocity = Vector2.zero;
+            body.angularVelocity = 0f;
+            body.position = new Vector2(target.x, target.y);
+            player.transform.position = target;
+
+            Debug.Log("SpaceWorld Play From Here: Player returned to the Set Point.");
+        }
+
+        [MenuItem(ReturnMenuPath, true)]
+        private static bool ValidateReturnToSetPoint()
+        {
+            return EditorApplication.isPlaying;
+        }
         private static void OnSceneGUI(SceneView view)
         {
             Scene scene = SceneManager.GetActiveScene();
@@ -329,6 +402,58 @@ namespace Game.EditorTools
             return true;
         }
 
+        private static bool TryResetPlayerTransientState(GameObject player, out string failure)
+        {
+            MonoBehaviour controller = null;
+            MonoBehaviour[] behaviours = player.GetComponentsInChildren<MonoBehaviour>(true);
+            for (int i = 0; i < behaviours.Length; i++)
+            {
+                MonoBehaviour behaviour = behaviours[i];
+                if (behaviour == null || behaviour.GetType().FullName != PlayerControllerTypeName) continue;
+                if (controller != null)
+                {
+                    failure = "More than one PlayerController was found under the active Player.";
+                    return false;
+                }
+                controller = behaviour;
+            }
+
+            if (controller == null)
+            {
+                failure = "PlayerController was not found under the active Player.";
+                return false;
+            }
+
+            MethodInfo resetMethod = controller.GetType().GetMethod(
+                "ResetTransientState",
+                BindingFlags.Instance | BindingFlags.Public,
+                null,
+                Type.EmptyTypes,
+                null);
+            if (resetMethod == null || resetMethod.ReturnType != typeof(void))
+            {
+                failure = "PlayerController.ResetTransientState() is unavailable.";
+                return false;
+            }
+
+            try
+            {
+                resetMethod.Invoke(controller, null);
+                failure = null;
+                return true;
+            }
+            catch (TargetInvocationException exception)
+            {
+                Exception cause = exception.InnerException ?? exception;
+                failure = "PlayerController.ResetTransientState() failed: " + cause.Message;
+                return false;
+            }
+            catch (Exception exception)
+            {
+                failure = "PlayerController.ResetTransientState() failed: " + exception.Message;
+                return false;
+            }
+        }
         private static string HashSceneFile(string scenePath)
         {
             string projectRoot = Directory.GetParent(Application.dataPath).FullName;
