@@ -1,72 +1,123 @@
+using Cinemachine;
+using Game.Input;
 using Game.Player;
 using UnityEngine;
 
 namespace Game.Systems
 {
     [DisallowMultipleComponent]
+    [RequireComponent(typeof(CinemachineVirtualCamera))]
     public class CameraLookAheadTarget2D : MonoBehaviour
     {
-        [Header("References")]
-        [SerializeField] private Transform target;
-        [SerializeField] private PlayerController player;
+        [Header("Manual Look")]
+        [SerializeField] private Vector2 maximumOffset = new Vector2(2.5f, 1.5f);
+        [SerializeField, Range(0f, 0.9f)] private float inputDeadzone = 0.15f;
+        [SerializeField, Range(1f, 30f)] private float lookSharpness = 8f;
+        [SerializeField, Range(1f, 30f)] private float returnSharpness = 5f;
 
-        [Header("Look Ahead")]
-        [SerializeField] private bool enableLookAhead = true;
-        [SerializeField, Range(0f, 4f)] private float horizontalLookAhead = 1.2f;
-        [SerializeField, Range(0f, 2f)] private float verticalLookAhead = 0.35f;
-        [SerializeField, Range(1f, 20f)] private float followSharpness = 8f;
-        [SerializeField, Range(0f, 2f)] private float wallSlideLookAheadMultiplier = 0.45f;
-
-        private Vector3 velocity;
-
-        public Transform TargetProxy => transform;
+        private CinemachineVirtualCamera virtualCamera;
+        private CinemachineFramingTransposer framingTransposer;
+        private CinemachineBrain brain;
+        private Transform inputSource;
+        private InputReader input;
+        private PlayerController player;
+        private Vector3 baseTrackedObjectOffset;
+        private Vector2 currentManualOffset;
 
         private void Reset()
         {
-            target = transform.parent;
-            if (target != null)
-                player = target.GetComponent<PlayerController>();
+            maximumOffset = new Vector2(2.5f, 1.5f);
+            inputDeadzone = 0.15f;
+            lookSharpness = 8f;
+            returnSharpness = 5f;
         }
 
-        private void Awake()
+        private void OnEnable()
         {
-            if (target == null && transform.parent != null)
-                target = transform.parent;
-
-            if (player == null && target != null)
-                player = target.GetComponent<PlayerController>();
+            virtualCamera = GetComponent<CinemachineVirtualCamera>();
+            ResolveDependencies(true);
         }
 
         private void LateUpdate()
         {
-            if (target == null) return;
+            ResolveDependencies(false);
+            if (framingTransposer == null)
+                return;
 
-            Vector3 desired = target.position;
-            if (enableLookAhead)
-                desired += CalculateLookAheadOffset();
+            bool cameraHasPriority =
+                virtualCamera != null &&
+                virtualCamera.isActiveAndEnabled &&
+                CinemachineCore.Instance.IsLive(virtualCamera) &&
+                (brain == null || !brain.IsBlending);
+            bool playerAllowsLook = player == null || !player.IsExternalControlLocked;
+            Vector2 desiredOffset = cameraHasPriority && playerAllowsLook
+                ? CalculateDesiredOffset()
+                : Vector2.zero;
+            float sharpness = desiredOffset.sqrMagnitude > 0.0001f
+                ? lookSharpness
+                : returnSharpness;
+            float blend = 1f - Mathf.Exp(-Mathf.Max(0.01f, sharpness) * Time.deltaTime);
+            currentManualOffset = Vector2.Lerp(currentManualOffset, desiredOffset, blend);
 
-            transform.position = Vector3.SmoothDamp(
-                transform.position,
-                desired,
-                ref velocity,
-                1f / Mathf.Max(0.01f, followSharpness)
-            );
+            framingTransposer.m_TrackedObjectOffset = baseTrackedObjectOffset +
+                new Vector3(currentManualOffset.x, currentManualOffset.y, 0f);
         }
 
-        private Vector3 CalculateLookAheadOffset()
+        private void OnDisable()
         {
-            if (player == null)
-                return Vector3.zero;
+            if (framingTransposer != null)
+                framingTransposer.m_TrackedObjectOffset = baseTrackedObjectOffset;
 
-            Vector2 playerVelocity = player.Velocity;
-            float horizontalSign = Mathf.Abs(playerVelocity.x) > 0.1f
-                ? Mathf.Sign(playerVelocity.x)
-                : (player.FacingLeft ? -1f : 1f);
+            currentManualOffset = Vector2.zero;
+        }
 
-            float multiplier = player.IsWallSliding ? wallSlideLookAheadMultiplier : 1f;
-            float x = horizontalSign * horizontalLookAhead * multiplier;
-            float y = Mathf.Clamp(playerVelocity.y / 12f, -1f, 1f) * verticalLookAhead;
-            return new Vector3(x, y, 0f);
+        private void ResolveDependencies(bool force)
+        {
+            if (virtualCamera == null)
+                virtualCamera = GetComponent<CinemachineVirtualCamera>();
+
+            if (brain == null && Camera.main != null)
+                brain = Camera.main.GetComponent<CinemachineBrain>();
+
+            CinemachineFramingTransposer resolvedFraming = virtualCamera != null
+                ? virtualCamera.GetCinemachineComponent<CinemachineFramingTransposer>()
+                : null;
+            if (force || resolvedFraming != framingTransposer)
+            {
+                framingTransposer = resolvedFraming;
+                if (framingTransposer != null)
+                    baseTrackedObjectOffset = framingTransposer.m_TrackedObjectOffset;
+            }
+
+            Transform resolvedSource = virtualCamera != null ? virtualCamera.Follow : null;
+            if (!force && resolvedSource == inputSource)
+                return;
+
+            inputSource = resolvedSource;
+            input = inputSource != null
+                ? inputSource.GetComponentInParent<InputReader>()
+                : null;
+            player = inputSource != null
+                ? inputSource.GetComponentInParent<PlayerController>()
+                : null;
+        }
+
+        private Vector2 CalculateDesiredOffset()
+        {
+            if (input == null)
+                return Vector2.zero;
+
+            Vector2 look = Vector2.ClampMagnitude(input.CameraLookInput, 1f);
+            float magnitude = look.magnitude;
+            float deadzone = Mathf.Clamp(inputDeadzone, 0f, 0.9f);
+            if (magnitude <= deadzone)
+                return Vector2.zero;
+
+            float scaledMagnitude = Mathf.InverseLerp(deadzone, 1f, magnitude);
+            Vector2 scaledLook = look / magnitude * scaledMagnitude;
+            return new Vector2(
+                scaledLook.x * Mathf.Max(0f, maximumOffset.x),
+                scaledLook.y * Mathf.Max(0f, maximumOffset.y));
         }
     }
 }

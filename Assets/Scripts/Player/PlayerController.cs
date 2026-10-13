@@ -133,7 +133,6 @@ namespace Game.Player
         [SerializeField, Range(0.01f, 0.5f)] private float wallInputDeadzone = 0.2f;
         [SerializeField, Range(0.01f, 0.2f)] private float facingInputDeadzone = 0.15f;
         [SerializeField, Range(0.2f, 1f)] private float airborneFacingInputThreshold = 0.55f;
-        [SerializeField] private bool requirePushIntoWallForSlide = true;
 
         [Header("Wall Debug Temporal")]
         [SerializeField] private bool logWallDebug = false;
@@ -277,7 +276,6 @@ namespace Game.Player
 
         [Header("Sprint Slide / Forward Dive")]
         [SerializeField, Min(0.05f)] private float slideDuration = 0.65f;
-        [SerializeField, Min(0.01f)] private float diveHoldTime = 0.22f;
         [SerializeField, Min(0f)] private float slideInitialHorizontalSpeed = 10.5f;
         [SerializeField, Min(0f)] private float slideDeceleration = 8f;
         [SerializeField, Min(0f)] private float diveHorizontalImpulse = 3f;
@@ -336,6 +334,11 @@ namespace Game.Player
         [SerializeField, Range(-89f, 0f)] private float swingMinAngle = -75f;
         [SerializeField, Range(0f, 89f)] private float swingMaxAngle = 75f;
         [SerializeField, Min(0.01f)] private float swingMinBelowAnchor = 0.05f;
+
+        [Header("Swing - Rope Jump Assist")]
+        [SerializeField, Range(0f, 0.95f)] private float swingTopExitAssistStartRatio = 0.65f;
+        [SerializeField, Min(0f)] private float swingTopExitTargetHorizontalSpeed = 12f;
+        [SerializeField, Min(0f)] private float swingTopExitMaxAdditionalSpeed = 5f;
 
         [Header("Swing - HandPivot")]
         [SerializeField] private Transform swingHandAnchor;
@@ -497,8 +500,6 @@ namespace Game.Player
         private float combinedDiveAirDistance;
         private bool isUsingDiveColliderRecoveryProfile;
         private string lastPostureClearanceFailureReason = "none";
-        private bool sprintCrouchDecisionPending;
-        private InputReader.CrouchCommand pendingSprintCrouchShort;
 
         private float wallJumpLockTimer;
         private float defaultGravityScale;
@@ -532,6 +533,8 @@ namespace Game.Player
         private int lockedAttackDirType = 0;
 
         private bool isAttacking;
+        private bool isSustainedAirDownAttack;
+        private int sustainedDownAttackStartActionPressVersion;
         private bool canCancelAttack;
         private float attackStateTimer;
         private float cancelEnableTimer;
@@ -720,9 +723,10 @@ namespace Game.Player
                 ExitOverheadRail(false);
 
             if (locked)
-                CancelSprintCrouchDecision(
-                    "PlayerController.SetExternalControlLocked",
-                    true);
+            {
+                if (isAttacking)
+                    CancelAttack("external control");
+            }
 
             externalControlLocked = locked;
         }
@@ -780,7 +784,6 @@ namespace Game.Player
         public void ResetTransientState()
         {
             InvalidateSwingGrabTemporalState();
-            ClearSprintCrouchDecision();
             ClearSlipperyEffect();
             ForceEndFlagSpringPoleForReset();
             ForceEndOverheadRailForReset();
@@ -807,6 +810,8 @@ namespace Game.Player
             isDashing = false;
             isWallSliding = false;
             isAttacking = false;
+            isSustainedAirDownAttack = false;
+            sustainedDownAttackStartActionPressVersion = 0;
             canCancelAttack = false;
             suppressWallWhileDownHeld = false;
             slopeMovementSuppressedUntilAirborne = false;
@@ -952,8 +957,10 @@ namespace Game.Player
             upwardAirCurrentMomentumProtected = false;
             pendingDownHitBounce = false;
             downHitBounceAscentProtected = false;
-            CancelSprintCrouchDecision("PlayerController.OnDisable", true);
             ForceEndFlagSpringPoleForReset();
+
+            if (isAttacking)
+                CancelAttack("controller disabled");
 
             if (playerHealth != null)
                 playerHealth.OnDamaged -= HandlePlayerDamaged;
@@ -1017,7 +1024,6 @@ namespace Game.Player
         {
             if (input == null) return false;
 
-            ClearSprintCrouchDecision();
             input.CancelCrouchGesture(source);
             return TryApplyPosture(InputReader.PlayerPosture.Standing, source);
         }
@@ -1026,7 +1032,6 @@ namespace Game.Player
         {
             if (capsule == null || input == null) return;
 
-            ClearSprintCrouchDecision();
             input.CancelCrouchGesture(source);
             ApplyPostureColliderProfile(InputReader.PlayerPosture.Standing);
             input.CommitPosture(InputReader.PlayerPosture.Standing, source);
@@ -1356,11 +1361,12 @@ namespace Game.Player
             // Timers de ataque (cancel window)
             if (isAttacking)
             {
-                attackStateTimer -= Time.deltaTime;
+                if (!isSustainedAirDownAttack)
+                    attackStateTimer -= Time.deltaTime;
                 cancelEnableTimer -= Time.deltaTime;
                 canCancelAttack = cancelEnableTimer <= 0f;
 
-                if (attackStateTimer <= 0f)
+                if (!isSustainedAirDownAttack && attackStateTimer <= 0f)
                 {
                     isAttacking = false;
                     canCancelAttack = false;
@@ -1409,11 +1415,15 @@ namespace Game.Player
 
             // Flip por movimiento (si no está lockeado por parry)
             float facingThreshold = isGrounded ? facingInputDeadzone : airborneFacingInputThreshold;
-            if (!IsMoveLockedByParry && Mathf.Abs(rawInputX) >= facingThreshold)
+            if (!IsMoveLockedByParry && !isWallSliding && Mathf.Abs(rawInputX) >= facingThreshold)
                 ApplyFacing((int)Mathf.Sign(rawInputX));
 
             CheckGround();
+            if (isSustainedAirDownAttack && isGrounded)
+                CancelAttack("down attack landed");
             CheckWall(inputY);
+
+            TryCancelSustainedDownAttackFromNewAction();
 
             InputReader.CrouchCommand crouchCommand = input.ConsumeCrouchPress();
             if (HandleCrouchCommand(crouchCommand))
@@ -1432,6 +1442,10 @@ namespace Game.Player
             bool dashPressed = stats.hasDash && input.ConsumeDashPressed();
             bool attackPressed = input.ConsumeAttackPressed();
             bool interactPressed = input.ConsumeInteractPressed();
+            bool dolphinDivePressed = input.ConsumeDolphinDivePressed();
+
+            if (dolphinDivePressed && TryStartDirectSprintDive())
+                return;
 
             // ✅ Jump desde Crouch/LayDown: NO salta; intenta levantarse
             if (jumpPressed && (IsCrouching || IsLayDown))
@@ -1607,6 +1621,7 @@ namespace Game.Player
 
             suppressWallSlideThisFixed = false;
             CheckGround();
+            UpdateSustainedAirDownAttack();
             TryResolveDiveColliderRecoveryProfile();
             UpdateSprintTimers(Time.fixedDeltaTime);
             UpdateSprintState();
@@ -1649,10 +1664,15 @@ namespace Game.Player
 
             ComputeAndLockAttackDirection();
             attackSequenceId = attackSequenceId == int.MaxValue ? 1 : attackSequenceId + 1;
+            attackDamageTargets.Clear();
 
             animDriver?.TriggerAttack(lockedAttackDirType);
 
             isAttacking = true;
+            isSustainedAirDownAttack = lockedAttackDirType == 2 && !isGrounded;
+            sustainedDownAttackStartActionPressVersion = isSustainedAirDownAttack && input != null
+                ? input.GameplayActionPressVersion
+                : 0;
             canCancelAttack = false;
             attackStateTimer = attackLockSeconds;
             cancelEnableTimer = attackCancelEnableSeconds;
@@ -1668,14 +1688,36 @@ namespace Game.Player
                     $"attackId={attackSequenceId} didHit={didHit} enemy={lastAttackHitEnemy}");
             }
 
-            if (didHit)
-            {
-                if (lastAttackHitEnemy && hitStopSeconds > 0f)
-                    HitStopManager.Request(hitStopSeconds);
+            ResolveAttackHit(didHit);
+        }
 
-                if (lockedAttackDirType == 2 && lastAttackAllowsDownBounce)
-                    QueueDownHitBounce();
+        private void UpdateSustainedAirDownAttack()
+        {
+            if (!isSustainedAirDownAttack)
+                return;
+
+            if (!isAttacking || isGrounded)
+            {
+                CancelAttack(isGrounded ? "down attack landed" : "down attack interrupted");
+                return;
             }
+
+            ResolveAttackHit(Attack(Vector2.down));
+        }
+
+        private void ResolveAttackHit(bool didHit)
+        {
+            if (!didHit)
+                return;
+
+            if (lastAttackHitEnemy && hitStopSeconds > 0f)
+                HitStopManager.Request(hitStopSeconds);
+
+            if (lockedAttackDirType == 2 && lastAttackAllowsDownBounce)
+                QueueDownHitBounce();
+
+            if (isSustainedAirDownAttack)
+                CancelAttack("down attack hit");
         }
 
         private void QueueDownHitBounce()
@@ -1740,12 +1782,26 @@ namespace Game.Player
         private void CancelAttack(string reason)
         {
             isAttacking = false;
+            isSustainedAirDownAttack = false;
+            sustainedDownAttackStartActionPressVersion = 0;
             canCancelAttack = false;
             attackStateTimer = 0f;
             cancelEnableTimer = 0f;
 
             if (debugLogs)
                 Debug.Log($"[PLAYER ATTACK] CANCELED by {reason}");
+        }
+
+        private bool TryCancelSustainedDownAttackFromNewAction()
+        {
+            if (!isSustainedAirDownAttack || input == null ||
+                input.GameplayActionPressVersion == sustainedDownAttackStartActionPressVersion)
+            {
+                return false;
+            }
+
+            CancelAttack("new gameplay action");
+            return true;
         }
 
         private void ComputeAndLockAttackDirection()
@@ -1774,7 +1830,6 @@ namespace Game.Player
         {
             if (attackPoint == null) return false;
 
-            attackDamageTargets.Clear();
             lastAttackAllowsDownBounce = false;
             lastAttackUsesDirectionalDownHitBounce = false;
             lastAttackUsesTankDownHitBounce = false;
@@ -2551,6 +2606,9 @@ namespace Game.Player
 
         private void HandlePlayerDamaged(int damage)
         {
+            if (isAttacking)
+                CancelAttack("damaged");
+
             if (isFlagSpringPoleAttached)
                 ExitFlagSpringPole(false, true);
 
@@ -2564,6 +2622,9 @@ namespace Game.Player
         /// </summary>
         internal void PrepareForHitStun()
         {
+            if (isAttacking)
+                CancelAttack("hit-stun");
+
             if (isDashing)
                 EndDash();
 
@@ -3082,6 +3143,9 @@ namespace Game.Player
         {
             if (!isSwinging && (swingJoint == null || !swingJoint.enabled)) return;
 
+            Vector2 ropeAnchor = currentSwingPole != null
+                ? currentSwingPole.AnchorPosition
+                : rb.position;
             isSwinging = false;
             currentSwingPole = null;
 
@@ -3102,7 +3166,9 @@ namespace Game.Player
             {
                 int jumpDir = inputXClean != 0f ? (int)Mathf.Sign(inputXClean) : facingDir;
                 ApplyFacing(jumpDir);
-                rb.velocity = keptVelocity + new Vector2(jumpDir * swingJumpForceX, swingJumpForceY);
+                Vector2 releaseVelocity = keptVelocity +
+                    new Vector2(jumpDir * swingJumpForceX, swingJumpForceY);
+                rb.velocity = ApplyRopeTopExitAssist(releaseVelocity, ropeAnchor, jumpDir);
             }
             else
             {
@@ -3111,6 +3177,40 @@ namespace Game.Player
 
             if (debugLogs)
                 Debug.Log($"[SWING] EXIT mode=Rope jump={jumpRelease} velocity={rb.velocity}");
+        }
+
+        private Vector2 ApplyRopeTopExitAssist(
+            Vector2 releaseVelocity,
+            Vector2 ropeAnchor,
+            int exitDirection)
+        {
+            Vector2 radius = rb.position - ropeAnchor;
+            if (radius.sqrMagnitude <= 0.0001f)
+                return releaseVelocity;
+
+            float signedAngle = Vector2.SignedAngle(Vector2.down, radius.normalized);
+            float angleLimit = signedAngle < 0f
+                ? Mathf.Abs(swingMinAngle)
+                : Mathf.Abs(swingMaxAngle);
+            float arcRatio = angleLimit > 0.01f
+                ? Mathf.Clamp01(Mathf.Abs(signedAngle) / angleLimit)
+                : 0f;
+            float assistStart = Mathf.Clamp01(swingTopExitAssistStartRatio);
+            float assist = Mathf.SmoothStep(
+                0f,
+                1f,
+                Mathf.InverseLerp(assistStart, 1f, arcRatio));
+
+            int safeDirection = exitDirection < 0 ? -1 : 1;
+            float forwardSpeed = releaseVelocity.x * safeDirection;
+            float missingSpeed = Mathf.Max(
+                0f,
+                swingTopExitTargetHorizontalSpeed - forwardSpeed);
+            float addedSpeed = Mathf.Min(
+                missingSpeed,
+                Mathf.Max(0f, swingTopExitMaxAdditionalSpeed)) * assist;
+            releaseVelocity.x += safeDirection * addedSpeed;
+            return releaseVelocity;
         }
 
         private void ExitHandPivotSwing(bool jumpRelease, float inputXClean)
@@ -3363,69 +3463,13 @@ namespace Game.Player
         // --------------------
         private bool HandleCrouchCommand(InputReader.CrouchCommand command)
         {
-            if (sprintCrouchDecisionPending)
-                return ResolvePendingSprintCrouchDecision(command);
-
             if (CanStartSprintSlide(command))
             {
-                const string source = "PlayerController.HandleCrouchCommand:SprintDecision";
-                if (input.CrouchHeld && input.TryDeferStandingCrouchShort(source))
-                {
-                    sprintCrouchDecisionPending = true;
-                    pendingSprintCrouchShort = command;
-                    return false;
-                }
-
                 if (TryStartSprintSlide())
                     return true;
             }
 
             ApplyNormalCrouchCommand(command);
-            return false;
-        }
-
-        private bool ResolvePendingSprintCrouchDecision(
-            InputReader.CrouchCommand command)
-        {
-            if (command.IsValid)
-            {
-                if (command.PressType == InputReader.CrouchPressType.Long)
-                {
-                    ClearSprintCrouchDecision();
-                    if (CanStartDirectSprintDive(command) && TryStartDirectSprintDive())
-                        return true;
-
-                    input.ResumeDeferredStandingCrouchShort(
-                        "PlayerController.ResolvePendingSprintCrouchDecision:LongFallback");
-                    ApplyNormalCrouchCommand(command);
-                    return false;
-                }
-
-                if (command.PressType == InputReader.CrouchPressType.Short)
-                {
-                    ClearSprintCrouchDecision();
-                    if (CanStartSprintSlide(command) && TryStartSprintSlide())
-                        return true;
-
-                    ApplyNormalCrouchCommand(command);
-                    return false;
-                }
-            }
-
-            if (!input.CrouchHeld)
-            {
-                ClearSprintCrouchDecision();
-                return false;
-            }
-
-            if (CanMaintainSprintCrouchDecision())
-                return false;
-
-            InputReader.CrouchCommand shortCommand = pendingSprintCrouchShort;
-            input.ResumeDeferredStandingCrouchShort(
-                "PlayerController.ResolvePendingSprintCrouchDecision:StateChanged");
-            ClearSprintCrouchDecision();
-            ApplyNormalCrouchCommand(shortCommand);
             return false;
         }
 
@@ -3446,7 +3490,7 @@ namespace Game.Player
                 "PlayerController.Update:CrouchPressWhileAirborne");
         }
 
-        private bool CanMaintainSprintCrouchDecision()
+        private bool CanStartDirectSprintDive()
         {
             return
                 isActiveAndEnabled &&
@@ -3464,32 +3508,6 @@ namespace Game.Player
                 !isOverheadRailHanging &&
                 !IsMoveLockedByParry &&
                 sprintSlideDiveState == SprintSlideDiveState.None;
-        }
-
-        private bool CanStartDirectSprintDive(InputReader.CrouchCommand command)
-        {
-            return
-                command.IsValid &&
-                command.PressType == InputReader.CrouchPressType.Long &&
-                command.OriginalPosture == InputReader.PlayerPosture.Standing &&
-                command.TargetPosture == InputReader.PlayerPosture.LayDown &&
-                CanMaintainSprintCrouchDecision();
-        }
-
-        private void ClearSprintCrouchDecision()
-        {
-            sprintCrouchDecisionPending = false;
-            pendingSprintCrouchShort = default;
-        }
-
-        private void CancelSprintCrouchDecision(string source, bool cancelGesture)
-        {
-            if (!sprintCrouchDecisionPending)
-                return;
-
-            ClearSprintCrouchDecision();
-            if (cancelGesture)
-                input?.CancelCrouchGesture(source);
         }
 
         private bool CanStartSprintSlide(InputReader.CrouchCommand command)
@@ -3585,16 +3603,7 @@ namespace Game.Player
             {
                 slideElapsed += Time.deltaTime;
 
-                if (input.CrouchHeld && slideElapsed >= Mathf.Max(0.01f, diveHoldTime))
-                {
-                    if (TryStartForwardDive())
-                        return;
-                }
-
-                float slideEndTime = Mathf.Max(0.05f, slideDuration);
-                if (input.CrouchHeld)
-                    slideEndTime = Mathf.Max(slideEndTime, Mathf.Max(0.01f, diveHoldTime));
-                if (slideElapsed >= slideEndTime)
+                if (slideElapsed >= Mathf.Max(0.05f, slideDuration))
                     TryFinishSlideInCrouch();
 
                 return;
@@ -3648,21 +3657,11 @@ namespace Game.Player
                 ApplyBetterJumpGravity();
         }
 
-        private bool TryStartForwardDive()
-        {
-            const string source = "PlayerController.TryStartForwardDive";
-            if (!CanChangeColliderProfile(
-                    slideColliderProfile,
-                    diveColliderProfile,
-                    InputReader.PlayerPosture.Standing,
-                    source))
-                return false;
-
-            return EnterForwardDive("Slide -> Dive");
-        }
-
         private bool TryStartDirectSprintDive()
         {
+            if (!CanStartDirectSprintDive())
+                return false;
+
             const string source = "PlayerController.TryStartDirectSprintDive";
             if (!CanChangeColliderProfile(
                     standingColliderProfile,
@@ -3674,7 +3673,6 @@ namespace Game.Player
             }
 
             InitializeSprintSlideDiveManeuver();
-            input.ClaimCrouchGesture(source);
             return EnterForwardDive("Sprint -> Dive");
         }
 
@@ -3721,11 +3719,20 @@ namespace Game.Player
 
         private bool TryFinishSlideInCrouch()
         {
+            const string source = "PlayerController.TryFinishSlideInCrouch";
+            InputReader.PlayerPosture exitPosture = InputReader.PlayerPosture.Crouching;
             if (!TryApplyPostureFromProfile(
                     slideColliderProfile,
-                    InputReader.PlayerPosture.Crouching,
-                    "PlayerController.TryFinishSlideInCrouch"))
-                return false;
+                    exitPosture,
+                    source))
+            {
+                exitPosture = InputReader.PlayerPosture.LayDown;
+                if (!TryApplyPostureFromProfile(
+                        slideColliderProfile,
+                        exitPosture,
+                        source + ":LayDownFallback"))
+                    return false;
+            }
 
             int slideDirection = sprintSlideDiveDirection;
             float normalSlideDistance = DirectedHorizontalDistance(
@@ -3743,7 +3750,8 @@ namespace Game.Player
                     $"[SLIDE/DIVE DISTANCE] NormalSlide " +
                     $"sprintEntryVx={slideManeuverSprintEntryVelocityX:0.00} " +
                     $"slideEntrySpeed={slideManeuverInitialSpeed:0.00} " +
-                    $"slideDx={normalSlideDistance:0.000} exitVx={rb.velocity.x:0.00}");
+                    $"slideDx={normalSlideDistance:0.000} exitVx={rb.velocity.x:0.00} " +
+                    $"posture={exitPosture}");
             }
 
             return true;
@@ -4468,6 +4476,8 @@ namespace Game.Player
                 return;
 
             float inputX = Mathf.Clamp(input.MoveInput.x, -1f, 1f);
+            if (isWallSliding)
+                inputX = 0f;
 
             if (isGrounded)
                 ClearHorizontalAirCurrentMomentum();
@@ -5082,22 +5092,16 @@ namespace Game.Player
                 return;
             }
 
-            bool exitingAwayFromWall = inputX != 0f && Mathf.Sign(inputX) == -slideSide;
             bool exitingDown = inputY < 0f;
-            if (wasWallSliding && (exitingAwayFromWall || exitingDown))
+            if (wasWallSliding && exitingDown)
             {
                 StartWallSlideExitFastFall();
-                LogWallSlideBlocked(exitingDown ? "voluntary exit down" : "voluntary exit away", inputX);
-                return;
-            }
-
-            if (!wasWallSliding && !IsInputPushingIntoWall(slideSide))
-            {
-                LogWallSlideBlocked(inputX == 0f ? "entry requires input" : "entry input not toward wall", inputX);
+                LogWallSlideBlocked("voluntary exit down", inputX);
                 return;
             }
 
             isWallSliding = true;
+            ApplyFacing(slideSide);
             ApplyWallSlideVelocity();
         }
 
@@ -5235,7 +5239,7 @@ namespace Game.Player
             Debug.Log(
                 $"[WALL SLIDE BLOCKED] reason={reason} inputX={inputX:0.00} wallSide={wallSide} " +
                 $"grounded={isGrounded} vy={rb.velocity.y:0.00} " +
-                $"requirePush={requirePushIntoWallForSlide} sameWallBlocked={IsSameWallClimbBlocked(wallSide)} " +
+                $"automaticEntry=True sameWallBlocked={IsSameWallClimbBlocked(wallSide)} " +
                 $"suppressFixed={suppressWallSlideThisFixed}");
         }
 
@@ -5718,7 +5722,9 @@ namespace Game.Player
             if (hasRightWall && hasLeftWall)
             {
                 isTouchingWall = true;
-                if (inputX != 0f)
+                if (isWallSliding && previousWallSide != 0)
+                    wallSide = previousWallSide;
+                else if (inputX != 0f)
                     wallSide = (int)Mathf.Sign(inputX);
                 else if (previousWallSide != 0)
                     wallSide = previousWallSide;
@@ -6360,7 +6366,8 @@ namespace Game.Player
 
         private void EnterHang(Vector2 lockedPos, Vector2 corner, bool hasClimbPosition, Vector2 climbPosition, LedgeGrabPoint sourcePoint)
         {
-            CancelSprintCrouchDecision("PlayerController.EnterHang", true);
+            if (isAttacking)
+                CancelAttack("ledge hang");
             ClearSprintMomentum();
             isHanging = true;
             isWallSliding = false;

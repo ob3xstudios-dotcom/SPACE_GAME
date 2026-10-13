@@ -228,7 +228,6 @@ MonoBehaviour:
   sprintMomentumDuration: 0.7
   sprintLandingMomentumDuration: 0.7
   slideDuration: 0.65
-  diveHoldTime: 0.22
   slideInitialHorizontalSpeed: 10.5
   slideDeceleration: 8
   diveHorizontalImpulse: 3

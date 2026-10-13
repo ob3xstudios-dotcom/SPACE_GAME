@@ -210,6 +210,24 @@ namespace Game.Input
                     ""processors"": """",
                     ""interactions"": """",
                     ""initialStateCheck"": false
+                },
+                {
+                    ""name"": ""CameraLook"",
+                    ""type"": ""Value"",
+                    ""id"": ""70d2f8ae-157e-4b17-a1a9-469961748c6d"",
+                    ""expectedControlType"": ""Vector2"",
+                    ""processors"": """",
+                    ""interactions"": """",
+                    ""initialStateCheck"": true
+                },
+                {
+                    ""name"": ""DolphinDive"",
+                    ""type"": ""Button"",
+                    ""id"": ""61f84e6e-6e42-4ebd-80e5-83c1c87c9f3d"",
+                    ""expectedControlType"": """",
+                    ""processors"": """",
+                    ""interactions"": ""Press"",
+                    ""initialStateCheck"": false
                 }
             ],
             ""bindings"": [
@@ -597,6 +615,94 @@ namespace Game.Input
                     ""action"": ""Cape"",
                     ""isComposite"": false,
                     ""isPartOfComposite"": false
+                },
+                {
+                    ""name"": """",
+                    ""id"": ""88c144c1-e0d7-4246-9b29-c9b4985f9324"",
+                    ""path"": ""<Gamepad>/rightStick"",
+                    ""interactions"": """",
+                    ""processors"": """",
+                    ""groups"": """",
+                    ""action"": ""CameraLook"",
+                    ""isComposite"": false,
+                    ""isPartOfComposite"": false
+                },
+                {
+                    ""name"": ""2D Vector"",
+                    ""id"": ""29b59114-1d00-43c5-a4ae-f3b817345752"",
+                    ""path"": ""2DVector"",
+                    ""interactions"": """",
+                    ""processors"": """",
+                    ""groups"": """",
+                    ""action"": ""CameraLook"",
+                    ""isComposite"": true,
+                    ""isPartOfComposite"": false
+                },
+                {
+                    ""name"": ""up"",
+                    ""id"": ""af18d83b-c937-4dbf-981f-0e8cd5d6d831"",
+                    ""path"": ""<Keyboard>/upArrow"",
+                    ""interactions"": """",
+                    ""processors"": """",
+                    ""groups"": """",
+                    ""action"": ""CameraLook"",
+                    ""isComposite"": false,
+                    ""isPartOfComposite"": true
+                },
+                {
+                    ""name"": ""down"",
+                    ""id"": ""336b2281-8219-40d2-904a-b20968609d1b"",
+                    ""path"": ""<Keyboard>/downArrow"",
+                    ""interactions"": """",
+                    ""processors"": """",
+                    ""groups"": """",
+                    ""action"": ""CameraLook"",
+                    ""isComposite"": false,
+                    ""isPartOfComposite"": true
+                },
+                {
+                    ""name"": ""left"",
+                    ""id"": ""4c53c292-0dac-4051-b633-4970224de424"",
+                    ""path"": ""<Keyboard>/leftArrow"",
+                    ""interactions"": """",
+                    ""processors"": """",
+                    ""groups"": """",
+                    ""action"": ""CameraLook"",
+                    ""isComposite"": false,
+                    ""isPartOfComposite"": true
+                },
+                {
+                    ""name"": ""right"",
+                    ""id"": ""e00123be-fef5-4c9a-bb90-841349a32414"",
+                    ""path"": ""<Keyboard>/rightArrow"",
+                    ""interactions"": """",
+                    ""processors"": """",
+                    ""groups"": """",
+                    ""action"": ""CameraLook"",
+                    ""isComposite"": false,
+                    ""isPartOfComposite"": true
+                },
+                {
+                    ""name"": """",
+                    ""id"": ""99b0908e-f140-49f6-bd08-712c94d5a87a"",
+                    ""path"": ""<Gamepad>/rightStickPress"",
+                    ""interactions"": """",
+                    ""processors"": """",
+                    ""groups"": """",
+                    ""action"": ""DolphinDive"",
+                    ""isComposite"": false,
+                    ""isPartOfComposite"": false
+                },
+                {
+                    ""name"": """",
+                    ""id"": ""8e8b872d-73ef-4380-8c7d-55ed5882c9f4"",
+                    ""path"": ""<Keyboard>/f"",
+                    ""interactions"": """",
+                    ""processors"": """",
+                    ""groups"": """",
+                    ""action"": ""DolphinDive"",
+                    ""isComposite"": false,
+                    ""isPartOfComposite"": false
                 }
             ]
         }
@@ -618,6 +724,8 @@ namespace Game.Input
             m_Gameplay_Map = m_Gameplay.FindAction("Map", throwIfNotFound: true);
             m_Gameplay_Skills = m_Gameplay.FindAction("Skills", throwIfNotFound: true);
             m_Gameplay_Cape = m_Gameplay.FindAction("Cape", throwIfNotFound: true);
+            m_Gameplay_CameraLook = m_Gameplay.FindAction("CameraLook", throwIfNotFound: true);
+            m_Gameplay_DolphinDive = m_Gameplay.FindAction("DolphinDive", throwIfNotFound: true);
         }
 
         ~@PlayerInputActions()
@@ -711,6 +819,8 @@ namespace Game.Input
         private readonly InputAction m_Gameplay_Map;
         private readonly InputAction m_Gameplay_Skills;
         private readonly InputAction m_Gameplay_Cape;
+        private readonly InputAction m_Gameplay_CameraLook;
+        private readonly InputAction m_Gameplay_DolphinDive;
         /// <summary>
         /// Provides access to input actions defined in input action map "Gameplay".
         /// </summary>
@@ -774,6 +884,14 @@ namespace Game.Input
             /// Provides access to the underlying input action "Gameplay/Cape".
             /// </summary>
             public InputAction @Cape => m_Wrapper.m_Gameplay_Cape;
+            /// <summary>
+            /// Provides access to the underlying input action "Gameplay/CameraLook".
+            /// </summary>
+            public InputAction @CameraLook => m_Wrapper.m_Gameplay_CameraLook;
+            /// <summary>
+            /// Provides access to the underlying input action "Gameplay/DolphinDive".
+            /// </summary>
+            public InputAction @DolphinDive => m_Wrapper.m_Gameplay_DolphinDive;
             /// <summary>
             /// Provides access to the underlying input action map instance.
             /// </summary>
@@ -839,6 +957,12 @@ namespace Game.Input
                 @Cape.started += instance.OnCape;
                 @Cape.performed += instance.OnCape;
                 @Cape.canceled += instance.OnCape;
+                @CameraLook.started += instance.OnCameraLook;
+                @CameraLook.performed += instance.OnCameraLook;
+                @CameraLook.canceled += instance.OnCameraLook;
+                @DolphinDive.started += instance.OnDolphinDive;
+                @DolphinDive.performed += instance.OnDolphinDive;
+                @DolphinDive.canceled += instance.OnDolphinDive;
             }
 
             /// <summary>
@@ -889,6 +1013,12 @@ namespace Game.Input
                 @Cape.started -= instance.OnCape;
                 @Cape.performed -= instance.OnCape;
                 @Cape.canceled -= instance.OnCape;
+                @CameraLook.started -= instance.OnCameraLook;
+                @CameraLook.performed -= instance.OnCameraLook;
+                @CameraLook.canceled -= instance.OnCameraLook;
+                @DolphinDive.started -= instance.OnDolphinDive;
+                @DolphinDive.performed -= instance.OnDolphinDive;
+                @DolphinDive.canceled -= instance.OnDolphinDive;
             }
 
             /// <summary>
@@ -1020,6 +1150,20 @@ namespace Game.Input
             /// <seealso cref="UnityEngine.InputSystem.InputAction.performed" />
             /// <seealso cref="UnityEngine.InputSystem.InputAction.canceled" />
             void OnCape(InputAction.CallbackContext context);
+            /// <summary>
+            /// Method invoked when associated input action "CameraLook" is either <see cref="UnityEngine.InputSystem.InputAction.started" />, <see cref="UnityEngine.InputSystem.InputAction.performed" /> or <see cref="UnityEngine.InputSystem.InputAction.canceled" />.
+            /// </summary>
+            /// <seealso cref="UnityEngine.InputSystem.InputAction.started" />
+            /// <seealso cref="UnityEngine.InputSystem.InputAction.performed" />
+            /// <seealso cref="UnityEngine.InputSystem.InputAction.canceled" />
+            void OnCameraLook(InputAction.CallbackContext context);
+            /// <summary>
+            /// Method invoked when associated input action "DolphinDive" is either <see cref="UnityEngine.InputSystem.InputAction.started" />, <see cref="UnityEngine.InputSystem.InputAction.performed" /> or <see cref="UnityEngine.InputSystem.InputAction.canceled" />.
+            /// </summary>
+            /// <seealso cref="UnityEngine.InputSystem.InputAction.started" />
+            /// <seealso cref="UnityEngine.InputSystem.InputAction.performed" />
+            /// <seealso cref="UnityEngine.InputSystem.InputAction.canceled" />
+            void OnDolphinDive(InputAction.CallbackContext context);
         }
     }
 }

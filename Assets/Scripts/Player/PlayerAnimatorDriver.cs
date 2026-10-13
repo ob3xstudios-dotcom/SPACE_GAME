@@ -39,6 +39,7 @@ namespace Game.Player
         [SerializeField] private string attackTrigger = "Attack";
         [Tooltip("Int para seleccionar anim: 0=Side, 1=Up, 2=Down")]
         [SerializeField] private string attackDirIntParam = "AttackDir";
+        [SerializeField] private string isAttackingBool = "IsAttacking";
 
         [Header("Parry Params")]
         [SerializeField] private string parryTrigger = "Parry";
@@ -65,12 +66,12 @@ namespace Game.Player
         private int wallSlidingHash, wallSlideEdgeHash, wallSideHash;
         private int overheadRailStealthHangingHash;
         private int jumpStartHash, jumpEndHash, wallImpactHash, wallJumpStartHash;
-        private int attackTrigHash, attackDirHash;
+        private int attackTrigHash, attackDirHash, isAttackingHash;
         private int parryTrigHash;
         private int crouchHash, layDownHash, slidingHash, divingHash;
         private bool hasWallSlidingParam, hasWallSlideEdgeParam, hasWallSideParam, hasJumpStartParam, hasJumpEndParam;
         private bool hasWallImpactParam, hasWallJumpStartParam;
-        private bool hasOverheadRailStealthHangingParam;
+        private bool hasOverheadRailStealthHangingParam, hasIsAttackingParam;
         private bool hasGroundedSample, wasGrounded, wasTouchingWall, wasWallSliding;
         private bool wasDiving;
         private bool wallSlideEdgeLatched;
@@ -102,6 +103,7 @@ namespace Game.Player
 
             attackTrigHash = Animator.StringToHash(attackTrigger);
             attackDirHash = Animator.StringToHash(attackDirIntParam);
+            isAttackingHash = Animator.StringToHash(isAttackingBool);
 
             parryTrigHash = Animator.StringToHash(parryTrigger);
 
@@ -119,6 +121,9 @@ namespace Game.Player
             hasWallJumpStartParam = HasAnimatorParameter(wallJumpStartHash, AnimatorControllerParameterType.Trigger);
             hasOverheadRailStealthHangingParam = HasAnimatorParameter(
                 overheadRailStealthHangingHash,
+                AnimatorControllerParameterType.Bool);
+            hasIsAttackingParam = HasAnimatorParameter(
+                isAttackingHash,
                 AnimatorControllerParameterType.Bool);
         }
 
@@ -199,6 +204,8 @@ namespace Game.Player
             }
 
             anim.SetInteger(attackDirHash, cachedAttackDir);
+            if (hasIsAttackingParam)
+                anim.SetBool(isAttackingHash, controller != null && controller.IsAttacking);
         }
 
         private float GetVisualSpeedX(float speedX, bool isGrounded)

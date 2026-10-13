@@ -36,6 +36,7 @@ namespace Game.Input
         }
 
         public Vector2 MoveInput { get; private set; }
+        public Vector2 CameraLookInput { get; private set; }
         public float MoveMagnitude01 => Mathf.Clamp01(MoveInput.magnitude);
 
         public bool JumpHeld { get; private set; }
@@ -47,6 +48,7 @@ namespace Game.Input
         public PlayerPosture CurrentPosture => posture;
         public bool IsCrouching => posture == PlayerPosture.Crouching;
         public bool IsLayDown => posture == PlayerPosture.LayDown;
+        public int GameplayActionPressVersion { get; private set; }
 
         private bool jumpPressed;
         private bool attackPressed;
@@ -55,6 +57,7 @@ namespace Game.Input
         private bool interactPressed;
         private bool mapPressed;
         private bool skillsPressed;
+        private int dolphinDivePressedFrame = -1;
         private int swingGrabPressedFrame = -1;
         private int swingGrabConsumedFrame = -1;
         private float swingGrabBufferedUntil = float.NegativeInfinity;
@@ -76,7 +79,6 @@ namespace Game.Input
         private float crouchHoldTimer;
         private bool longCrouchTriggeredThisHold;
         private bool crouchGestureClaimed;
-        private bool deferStandingShortUntilCanceled;
         private CrouchCommand pendingCrouchCommand;
         private int pendingCrouchPressFrame = -1;
         private string activeCrouchControlPath = "<none>";
@@ -96,6 +98,9 @@ namespace Game.Input
 
             actions.Gameplay.Move.performed += OnMovePerformed;
             actions.Gameplay.Move.canceled += OnMoveCanceled;
+            actions.Gameplay.CameraLook.performed += OnCameraLookPerformed;
+            actions.Gameplay.CameraLook.canceled += OnCameraLookCanceled;
+            actions.Gameplay.DolphinDive.started += OnDolphinDiveStarted;
 
             actions.Gameplay.Jump.started += OnJumpStarted;
             actions.Gameplay.Jump.canceled += OnJumpCanceled;
@@ -134,14 +139,19 @@ namespace Game.Input
             ClearSwingGrabBuffer();
             SprintHeld = false;
             CapeHeld = false;
+            CameraLookInput = Vector2.zero;
             MoveInputIsGamepad = false;
             mapPressed = false;
             skillsPressed = false;
+            dolphinDivePressedFrame = -1;
 
             if (actions == null) return;
 
             actions.Gameplay.Move.performed -= OnMovePerformed;
             actions.Gameplay.Move.canceled -= OnMoveCanceled;
+            actions.Gameplay.CameraLook.performed -= OnCameraLookPerformed;
+            actions.Gameplay.CameraLook.canceled -= OnCameraLookCanceled;
+            actions.Gameplay.DolphinDive.started -= OnDolphinDiveStarted;
 
             actions.Gameplay.Jump.started -= OnJumpStarted;
             actions.Gameplay.Jump.canceled -= OnJumpCanceled;
@@ -182,6 +192,9 @@ namespace Game.Input
             if (swingGrabPressedFrame >= 0 && swingGrabPressedFrame != Time.frameCount)
                 swingGrabPressedFrame = -1;
 
+            if (dolphinDivePressedFrame >= 0 && dolphinDivePressedFrame != Time.frameCount)
+                dolphinDivePressedFrame = -1;
+
             ExpireSwingGrabBuffer();
 
             ExpirePendingCrouchPress();
@@ -189,19 +202,26 @@ namespace Game.Input
             // FALLBACK DIRECTO: si los callbacks no llegan, esto debería detectarlo.
             if (actions != null && actions.Gameplay.Parry.WasPressedThisFrame())
             {
+                if (!parryPressed)
+                    RegisterGameplayActionPress();
                 parryPressed = true;
                 if (debugInput) Debug.Log("[INPUT] PARRY WasPressedThisFrame");
             }
 
             if (actions != null && actions.Gameplay.Interact.WasPressedThisFrame())
             {
+                if (!interactPressed)
+                    RegisterGameplayActionPress();
                 interactPressed = true;
                 if (debugInput) Debug.Log("[INPUT] INTERACT WasPressedThisFrame");
             }
 
             if (actions != null && actions.Gameplay.SwingGrab.WasPressedThisFrame())
             {
+                bool alreadyRegistered = swingGrabPressedFrame == Time.frameCount;
                 RegisterSwingGrabPressed();
+                if (!alreadyRegistered)
+                    RegisterGameplayActionPress();
                 if (debugInput) Debug.Log("[INPUT] SWING GRAB WasPressedThisFrame");
             }
 
@@ -253,6 +273,18 @@ namespace Game.Input
         {
             if (!interactPressed) return false;
             interactPressed = false;
+            return true;
+        }
+
+        public bool ConsumeDolphinDivePressed()
+        {
+            if (dolphinDivePressedFrame != Time.frameCount)
+            {
+                dolphinDivePressedFrame = -1;
+                return false;
+            }
+
+            dolphinDivePressedFrame = -1;
             return true;
         }
 
@@ -377,7 +409,6 @@ namespace Game.Input
         public void ClaimCrouchGesture(string source)
         {
             crouchGestureClaimed = true;
-            deferStandingShortUntilCanceled = false;
             ClearPendingCrouchPress();
 
             LogCrouchDiagnostic(
@@ -385,33 +416,6 @@ namespace Game.Input
                 details: $"source={source}");
 
             if (debugInput) Debug.Log($"[INPUT] CROUCH GESTURE CLAIMED ({source})");
-        }
-
-        public bool TryDeferStandingCrouchShort(string source)
-        {
-            if (!crouchHeld || longCrouchTriggeredThisHold || crouchGestureClaimed ||
-                crouchGestureOriginalPosture != PlayerPosture.Standing)
-            {
-                return false;
-            }
-
-            deferStandingShortUntilCanceled = true;
-            ClearPendingCrouchPress();
-            LogCrouchDiagnostic(
-                "short.defer",
-                details: $"source={source} result=await_short_or_long");
-            return true;
-        }
-
-        public void ResumeDeferredStandingCrouchShort(string source)
-        {
-            if (!deferStandingShortUntilCanceled)
-                return;
-
-            deferStandingShortUntilCanceled = false;
-            LogCrouchDiagnostic(
-                "short.resume",
-                details: $"source={source} result=normal_short");
         }
 
         private static PlayerPosture ResolveTargetPosture(
@@ -511,7 +515,6 @@ namespace Game.Input
             crouchHoldTimer = 0f;
             longCrouchTriggeredThisHold = false;
             crouchGestureClaimed = false;
-            deferStandingShortUntilCanceled = false;
             ClearPendingCrouchPress();
             activeCrouchControlPath = "<none>";
         }
@@ -566,8 +569,19 @@ namespace Game.Input
             MoveInputIsGamepad = false;
         }
 
+        private void OnCameraLookPerformed(InputAction.CallbackContext ctx)
+        {
+            CameraLookInput = Vector2.ClampMagnitude(ctx.ReadValue<Vector2>(), 1f);
+        }
+
+        private void OnCameraLookCanceled(InputAction.CallbackContext ctx)
+        {
+            CameraLookInput = Vector2.zero;
+        }
+
         private void OnJumpStarted(InputAction.CallbackContext ctx)
         {
+            RegisterGameplayActionPress();
             jumpPressed = true;
             JumpHeld = true;
 
@@ -581,6 +595,7 @@ namespace Game.Input
 
         private void OnSprintStarted(InputAction.CallbackContext ctx)
         {
+            RegisterGameplayActionPress();
             SprintHeld = true;
 
             if (debugInput) Debug.Log("[INPUT] SPRINT started");
@@ -595,6 +610,7 @@ namespace Game.Input
 
         private void OnStealthWalkStarted(InputAction.CallbackContext ctx)
         {
+            RegisterGameplayActionPress();
             StealthWalkHeld = true;
         }
 
@@ -605,6 +621,7 @@ namespace Game.Input
 
         private void OnCapeStarted(InputAction.CallbackContext ctx)
         {
+            RegisterGameplayActionPress();
             CapeHeld = true;
 
             if (debugInput) Debug.Log("[INPUT] CAPE started");
@@ -619,6 +636,7 @@ namespace Game.Input
 
         private void OnAttackStarted(InputAction.CallbackContext ctx)
         {
+            RegisterGameplayActionPress();
             attackPressed = true;
 
             if (debugInput) Debug.Log("[INPUT] ATTACK started");
@@ -626,6 +644,7 @@ namespace Game.Input
 
         private void OnDashStarted(InputAction.CallbackContext ctx)
         {
+            RegisterGameplayActionPress();
             dashPressed = true;
 
             if (debugInput) Debug.Log("[INPUT] DASH started");
@@ -633,6 +652,7 @@ namespace Game.Input
 
         private void OnInteractStarted(InputAction.CallbackContext ctx)
         {
+            RegisterGameplayActionPress();
             interactPressed = true;
 
             if (debugInput) Debug.Log("[INPUT] INTERACT started");
@@ -673,6 +693,7 @@ namespace Game.Input
 
         private void OnParryStarted(InputAction.CallbackContext ctx)
         {
+            RegisterGameplayActionPress();
             parryPressed = true;
             if (debugInput) Debug.Log("[INPUT] PARRY started");
         }
@@ -685,6 +706,7 @@ namespace Game.Input
 
         private void OnSwingGrabStarted(InputAction.CallbackContext ctx)
         {
+            RegisterGameplayActionPress();
             RegisterSwingGrabPressed();
             if (debugInput) Debug.Log("[INPUT] SWING GRAB started");
         }
@@ -733,7 +755,7 @@ namespace Game.Input
             crouchHoldTimer = 0f;
             longCrouchTriggeredThisHold = false;
             crouchGestureClaimed = false;
-            deferStandingShortUntilCanceled = false;
+            RegisterGameplayActionPress();
             bool previewCrouchingFromLayDown =
                 crouchGestureOriginalPosture == PlayerPosture.LayDown;
             bool deferShortUntilCanceled =
@@ -791,8 +813,7 @@ namespace Game.Input
 
             bool registerDeferredShort =
                 !longCrouchTriggeredThisHold &&
-                (crouchGestureOriginalPosture != PlayerPosture.Standing ||
-                 deferStandingShortUntilCanceled);
+                crouchGestureOriginalPosture != PlayerPosture.Standing;
 
             if (longCrouchTriggeredThisHold)
             {
@@ -816,7 +837,6 @@ namespace Game.Input
             crouchHeld = false;
             crouchHoldTimer = 0f;
             longCrouchTriggeredThisHold = false;
-            deferStandingShortUntilCanceled = false;
 
             if (registerDeferredShort)
                 RegisterCrouchPress(CrouchPressType.Short);
@@ -827,6 +847,21 @@ namespace Game.Input
                 controlValue,
                 $"registeredOrder={(registerDeferredShort ? CrouchPressType.Short : CrouchPressType.None)}");
             activeCrouchControlPath = "<none>";
+        }
+
+        private void OnDolphinDiveStarted(InputAction.CallbackContext ctx)
+        {
+            RegisterGameplayActionPress();
+            dolphinDivePressedFrame = Time.frameCount;
+
+            if (debugInput) Debug.Log("[INPUT] DOLPHIN DIVE started");
+        }
+
+        private void RegisterGameplayActionPress()
+        {
+            GameplayActionPressVersion = GameplayActionPressVersion == int.MaxValue
+                ? 1
+                : GameplayActionPressVersion + 1;
         }
     }
 }
