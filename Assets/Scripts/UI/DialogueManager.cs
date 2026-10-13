@@ -6,6 +6,8 @@ namespace Game.UI
 {
     public class DialogueManager : MonoBehaviour
     {
+        private const int StandardDialoguePriority = 100;
+
         [System.Serializable]
         public class DialogueEntry
         {
@@ -43,6 +45,8 @@ namespace Game.UI
         private readonly Dictionary<string, DialogueEntry> dialogueById = new Dictionary<string, DialogueEntry>();
         private DialogueEntry activeDialogue;
         private int activeLineIndex;
+        private string activeOwnerId;
+        private int activePriority = int.MinValue;
 
         public static DialogueManager Instance
         {
@@ -95,7 +99,8 @@ namespace Game.UI
                 Debug.LogWarning($"[DIALOGUE] Dialogue id not found: {dialogueId}. Showing fallback text.");
             }
 
-            if (dialogueRoot.activeSelf && activeDialogue == dialogue)
+            if (dialogueRoot.activeSelf && activeDialogue == dialogue &&
+                string.IsNullOrEmpty(activeOwnerId))
             {
                 AdvanceDialogue();
                 return;
@@ -103,6 +108,8 @@ namespace Game.UI
 
             activeDialogue = dialogue;
             activeLineIndex = 0;
+            activeOwnerId = null;
+            activePriority = StandardDialoguePriority;
             dialogueRoot.SetActive(true);
             RefreshLine();
 
@@ -113,6 +120,35 @@ namespace Game.UI
         public static void RequestDialogueLines(GameObject interactor, string dialogueId, string speaker, string[] lines)
         {
             Instance.ShowDialogueLines(interactor, dialogueId, speaker, lines);
+        }
+
+        public static bool TryRequestOwnedDialogueLines(
+            GameObject interactor,
+            string ownerId,
+            int priority,
+            string dialogueId,
+            string speaker,
+            string[] lines)
+        {
+            if (string.IsNullOrWhiteSpace(ownerId)) return false;
+            return Instance.TryShowOwnedDialogueLines(
+                interactor,
+                ownerId,
+                priority,
+                dialogueId,
+                speaker,
+                lines);
+        }
+
+        public static bool IsDialogueOwnedBy(string ownerId)
+        {
+            return instance != null && instance.IsOwnedBy(ownerId);
+        }
+
+        public static void HideDialogueOwnedBy(string ownerId)
+        {
+            if (instance != null)
+                instance.HideOwnedDialogue(ownerId);
         }
 
         public void ShowDialogueLines(GameObject interactor, string dialogueId, string speaker, string[] lines)
@@ -127,6 +163,8 @@ namespace Game.UI
             };
 
             activeLineIndex = 0;
+            activeOwnerId = null;
+            activePriority = StandardDialoguePriority;
             dialogueRoot.SetActive(true);
             RefreshLine();
 
@@ -152,6 +190,8 @@ namespace Game.UI
         {
             activeDialogue = null;
             activeLineIndex = 0;
+            activeOwnerId = null;
+            activePriority = int.MinValue;
 
             if (dialogueRoot != null)
                 dialogueRoot.SetActive(false);
@@ -159,8 +199,61 @@ namespace Game.UI
 
         public static void HideCurrentDialogue()
         {
-            if (instance != null)
+            if (instance != null && string.IsNullOrEmpty(instance.activeOwnerId))
                 instance.HideDialogue();
+        }
+
+        private bool TryShowOwnedDialogueLines(
+            GameObject interactor,
+            string ownerId,
+            int priority,
+            string dialogueId,
+            string speaker,
+            string[] lines)
+        {
+            EnsureReady();
+
+            bool hasActiveDialogue = activeDialogue != null &&
+                                     dialogueRoot != null &&
+                                     dialogueRoot.activeSelf;
+            bool ownedByCaller = string.Equals(
+                activeOwnerId,
+                ownerId,
+                System.StringComparison.Ordinal);
+            if (hasActiveDialogue && !ownedByCaller && activePriority >= priority)
+                return false;
+
+            activeDialogue = new DialogueEntry
+            {
+                id = dialogueId,
+                speaker = speaker,
+                lines = lines != null && lines.Length > 0 ? lines : new[] { dialogueId }
+            };
+            activeLineIndex = 0;
+            activeOwnerId = ownerId;
+            activePriority = priority;
+            dialogueRoot.SetActive(true);
+            RefreshLine();
+
+            if (debugLogs)
+                Debug.Log($"[DIALOGUE] Start owned {dialogueId} owner={ownerId} " +
+                          $"priority={priority} by {interactor?.name}");
+            return true;
+        }
+
+        private bool IsOwnedBy(string ownerId)
+        {
+            return !string.IsNullOrWhiteSpace(ownerId) &&
+                   activeDialogue != null &&
+                   dialogueRoot != null &&
+                   dialogueRoot.activeSelf &&
+                   string.Equals(activeOwnerId, ownerId, System.StringComparison.Ordinal);
+        }
+
+        private void HideOwnedDialogue(string ownerId)
+        {
+            if (IsOwnedBy(ownerId))
+                HideDialogue();
         }
 
         private void EnsureReady()

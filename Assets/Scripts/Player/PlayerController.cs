@@ -653,6 +653,7 @@ namespace Game.Player
             ? swingHandAnchor.position
             : transform.position;
 
+        public event Action NormalJumpPerformed;
         public event Action<int> WallJumped;
 
         // Para Animator (si lo usáis)
@@ -4683,6 +4684,7 @@ namespace Game.Player
             if (jumpStartDelay <= 0f)
             {
                 Jump();
+                NormalJumpPerformed?.Invoke();
                 return;
             }
 
@@ -4726,6 +4728,7 @@ namespace Game.Player
 
             hasPendingNormalJump = false;
             Jump();
+            NormalJumpPerformed?.Invoke();
         }
 
         private void ApplyBetterJumpGravity()

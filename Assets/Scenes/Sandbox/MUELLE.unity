@@ -7124,6 +7124,63 @@ Transform:
   m_CorrespondingSourceObject: {fileID: 41221643050875003, guid: 9b3ffc7109eecde4aac1a96bffcfd826, type: 3}
   m_PrefabInstance: {fileID: 871073172}
   m_PrefabAsset: {fileID: 0}
+--- !u!1001 &875036544
+PrefabInstance:
+  m_ObjectHideFlags: 0
+  serializedVersion: 2
+  m_Modification:
+    serializedVersion: 3
+    m_TransformParent: {fileID: 0}
+    m_Modifications:
+    - target: {fileID: 3572971415480090312, guid: ee293f6153a0e714ea0831bd68b0e614, type: 3}
+      propertyPath: m_LocalPosition.x
+      value: -244.6
+      objectReference: {fileID: 0}
+    - target: {fileID: 3572971415480090312, guid: ee293f6153a0e714ea0831bd68b0e614, type: 3}
+      propertyPath: m_LocalPosition.y
+      value: 4.43
+      objectReference: {fileID: 0}
+    - target: {fileID: 3572971415480090312, guid: ee293f6153a0e714ea0831bd68b0e614, type: 3}
+      propertyPath: m_LocalPosition.z
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: 3572971415480090312, guid: ee293f6153a0e714ea0831bd68b0e614, type: 3}
+      propertyPath: m_LocalRotation.w
+      value: 1
+      objectReference: {fileID: 0}
+    - target: {fileID: 3572971415480090312, guid: ee293f6153a0e714ea0831bd68b0e614, type: 3}
+      propertyPath: m_LocalRotation.x
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: 3572971415480090312, guid: ee293f6153a0e714ea0831bd68b0e614, type: 3}
+      propertyPath: m_LocalRotation.y
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: 3572971415480090312, guid: ee293f6153a0e714ea0831bd68b0e614, type: 3}
+      propertyPath: m_LocalRotation.z
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: 3572971415480090312, guid: ee293f6153a0e714ea0831bd68b0e614, type: 3}
+      propertyPath: m_LocalEulerAnglesHint.x
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: 3572971415480090312, guid: ee293f6153a0e714ea0831bd68b0e614, type: 3}
+      propertyPath: m_LocalEulerAnglesHint.y
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: 3572971415480090312, guid: ee293f6153a0e714ea0831bd68b0e614, type: 3}
+      propertyPath: m_LocalEulerAnglesHint.z
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: 7149599133433747666, guid: ee293f6153a0e714ea0831bd68b0e614, type: 3}
+      propertyPath: m_Name
+      value: Tutorial_MUELLE_Jump_001
+      objectReference: {fileID: 0}
+    m_RemovedComponents: []
+    m_RemovedGameObjects: []
+    m_AddedGameObjects: []
+    m_AddedComponents: []
+  m_SourcePrefab: {fileID: 100100000, guid: ee293f6153a0e714ea0831bd68b0e614, type: 3}
 --- !u!1001 &877399527
 PrefabInstance:
   m_ObjectHideFlags: 0
@@ -270697,3 +270754,4 @@ SceneRoots:
   - {fileID: 1624269480}
   - {fileID: 1251318575}
   - {fileID: 1658718087}
+  - {fileID: 875036544}

@@ -19,6 +19,15 @@ namespace SpaceWorld.Tests.PlayMode
         private const float SettleTimeout = 6f;
         private const float ActionTimeout = 5f;
         private const float InputPipelineTimeout = 1f;
+        private const string JumpTutorialId = "TUT_MUELLE_JUMP_001";
+        private const string RadioTutorialManagerTypeName =
+            "Game.Tutorials.RadioTutorialManager, Assembly-CSharp";
+        private const string RadioTutorialMarkerTypeName =
+            "Game.Tutorials.RadioTutorialMarker2D, Assembly-CSharp";
+        private const string DialogueManagerTypeName =
+            "Game.UI.DialogueManager, Assembly-CSharp";
+        private const string JumpTutorialDialogueOwnerId =
+            "RadioTutorial:" + JumpTutorialId;
 
         private Keyboard keyboard;
         private GameObject player;
@@ -38,6 +47,7 @@ namespace SpaceWorld.Tests.PlayMode
             bool setupCompleted = false;
             try
             {
+                ResetRadioTutorialRuntime();
                 yield return LoadFreshMuelle();
                 ResolvePlayer();
                 OverrideInputFocusPolicy();
@@ -95,6 +105,12 @@ namespace SpaceWorld.Tests.PlayMode
         [UnityTest]
         public IEnumerator PlayerMovesAndJumpsFromInput()
         {
+            yield return WaitForJumpTutorialToActivate();
+            Assert.That(
+                IsRadioTutorialCompletedThisSession(JumpTutorialId),
+                Is.False,
+                "The jump tutorial completed before a real normal jump.");
+
             float startX = playerBody.position.x;
             float maxVelocityX = playerBody.velocity.x;
             bool moved = false;
@@ -148,7 +164,106 @@ namespace SpaceWorld.Tests.PlayMode
                 $"rise={maxY - baselineY:0.000}, maxVelocityY={maxVelocityY:0.000}. " +
                 GetInputDiagnostics(Key.Space));
 
+            yield return WaitForJumpTutorialCompletion();
+
             yield return ReleaseKeyAndWaitForInputReader(Key.Space, "after jump");
+        }
+
+        [UnityTest]
+        public IEnumerator JumpTutorialPausesOnDepartureAndStaysCompletedAfterReentryAndRespawn()
+        {
+            yield return WaitForJumpTutorialToActivate();
+
+            Component marker = FindRadioTutorialMarker();
+            Assert.That(marker, Is.Not.Null, "MUELLE has no radio tutorial marker.");
+            BoxCollider2D markerCollider = marker.GetComponent<BoxCollider2D>();
+            Assert.That(markerCollider, Is.Not.Null, "The tutorial marker has no BoxCollider2D.");
+
+            yield return WaitForJumpTutorialDialogueOwnership();
+
+            Vector2 markerPosition = playerBody.position;
+            playerBody.velocity = Vector2.zero;
+            playerBody.position = new Vector2(
+                markerCollider.bounds.max.x + 2f,
+                markerPosition.y);
+            Physics2D.SyncTransforms();
+            yield return new WaitForFixedUpdate();
+            yield return WaitForJumpTutorialToPause();
+
+            Assert.That(
+                IsRadioTutorialCompletedThisSession(JumpTutorialId),
+                Is.False,
+                "Leaving the marker completed the jump tutorial without a valid jump.");
+            Assert.That(IsDialogueOwnedBy(JumpTutorialDialogueOwnerId), Is.False,
+                "Leaving the marker did not hide its tutorial dialogue.");
+
+            playerBody.velocity = Vector2.zero;
+            playerBody.position = markerPosition;
+            Physics2D.SyncTransforms();
+            yield return new WaitForFixedUpdate();
+            yield return WaitForJumpTutorialToActivate();
+            yield return WaitForJumpTutorialDialogueOwnership();
+
+            Vector2 jumpStart = playerBody.position;
+            yield return PressKeyAndWaitForInputPipeline(Key.Space, jumpStart, "tutorial jump");
+            yield return WaitForJumpTutorialCompletion();
+            yield return ReleaseKeyAndWaitForInputReader(Key.Space, "after tutorial jump");
+            yield return WaitForPlayerToStabilize("after completing the jump tutorial");
+
+            Vector2 stablePosition = playerBody.position;
+            playerBody.velocity = Vector2.zero;
+            playerBody.position = new Vector2(
+                markerCollider.bounds.max.x + 2f,
+                stablePosition.y);
+            Physics2D.SyncTransforms();
+            yield return new WaitForFixedUpdate();
+            yield return WaitForJumpTutorialToPause();
+
+            Assert.That(IsDialogueOwnedBy(JumpTutorialDialogueOwnerId), Is.False,
+                "Moving away did not hide the completed tutorial's confirmation dialogue.");
+
+            playerBody.velocity = Vector2.zero;
+            playerBody.position = stablePosition;
+            Physics2D.SyncTransforms();
+            yield return new WaitForFixedUpdate();
+
+            Assert.That(GetActiveRadioTutorialId(), Is.Null,
+                "Re-entering the marker restarted a session-completed tutorial.");
+            Assert.That(
+                IsRadioTutorialCompletedThisSession(JumpTutorialId),
+                Is.True,
+                "Re-entering the marker cleared session completion.");
+
+            GameObject respawnPoint = GameObject.Find("RespawnPointStart");
+            Assert.That(respawnPoint, Is.Not.Null,
+                "MUELLE's configured RespawnPointStart was not active in Play Mode.");
+
+            Vector2 expectedRespawn = respawnPoint.transform.position;
+            playerBody.position = new Vector2(playerBody.position.x, -40f);
+            Physics2D.SyncTransforms();
+
+            bool respawned = false;
+            float respawnDeadline = Time.realtimeSinceStartup + ActionTimeout;
+            while (Time.realtimeSinceStartup < respawnDeadline)
+            {
+                if (Vector2.Distance(playerBody.position, expectedRespawn) <= 0.75f &&
+                    playerBody.position.y > -35f)
+                {
+                    respawned = true;
+                    break;
+                }
+
+                yield return null;
+            }
+
+            Assert.That(respawned, Is.True,
+                "The Player did not respawn during the tutorial persistence check.");
+            Assert.That(GetActiveRadioTutorialId(), Is.Null,
+                "Respawning restarted a session-completed tutorial.");
+            Assert.That(
+                IsRadioTutorialCompletedThisSession(JumpTutorialId),
+                Is.True,
+                "Respawning cleared the tutorial's session completion.");
         }
 
         [UnityTest]
@@ -332,6 +447,137 @@ namespace SpaceWorld.Tests.PlayMode
             Assert.Fail(
                 $"Player did not become stable during {phase} within {SettleTimeout:0.0}s. " +
                 $"position={playerBody.position}, velocity={playerBody.velocity}.");
+        }
+
+        private static void ResetRadioTutorialRuntime()
+        {
+            Type managerType = GetRadioTutorialRuntimeType(RadioTutorialManagerTypeName);
+            UnityEngine.Object[] managers =
+                UnityEngine.Object.FindObjectsOfType(managerType, true);
+            for (int index = 0; index < managers.Length; index++)
+            {
+                Component manager = managers[index] as Component;
+                if (manager != null)
+                    UnityEngine.Object.DestroyImmediate(manager.gameObject);
+            }
+        }
+
+        private static IEnumerator WaitForJumpTutorialToActivate()
+        {
+            float deadline = Time.realtimeSinceStartup + 3f;
+            while (GetActiveRadioTutorialId() != JumpTutorialId &&
+                   Time.realtimeSinceStartup < deadline)
+            {
+                yield return null;
+            }
+
+            Assert.That(
+                GetActiveRadioTutorialId(),
+                Is.EqualTo(JumpTutorialId),
+                "The MUELLE jump tutorial did not activate at the starting marker.");
+        }
+
+        private static IEnumerator WaitForJumpTutorialCompletion()
+        {
+            float deadline = Time.realtimeSinceStartup + 2f;
+            while (!IsRadioTutorialCompletedThisSession(JumpTutorialId) &&
+                   Time.realtimeSinceStartup < deadline)
+            {
+                yield return null;
+            }
+
+            Assert.That(
+                IsRadioTutorialCompletedThisSession(JumpTutorialId),
+                Is.True,
+                "The real normal-jump event did not complete the tutorial.");
+        }
+
+        private static IEnumerator WaitForJumpTutorialToPause()
+        {
+            float deadline = Time.realtimeSinceStartup + 2f;
+            while (GetActiveRadioTutorialId() != null &&
+                   Time.realtimeSinceStartup < deadline)
+            {
+                yield return null;
+            }
+
+            Assert.That(GetActiveRadioTutorialId(), Is.Null,
+                "The jump tutorial remained active after moving away from its marker.");
+        }
+
+        private static IEnumerator WaitForJumpTutorialDialogueOwnership()
+        {
+            float deadline = Time.realtimeSinceStartup + 2f;
+            while (!IsDialogueOwnedBy(JumpTutorialDialogueOwnerId) &&
+                   Time.realtimeSinceStartup < deadline)
+            {
+                yield return null;
+            }
+
+            Assert.That(IsDialogueOwnedBy(JumpTutorialDialogueOwnerId), Is.True,
+                "The jump tutorial did not acquire its dialogue presentation.");
+        }
+
+        private static string GetActiveRadioTutorialId()
+        {
+            Type managerType = GetRadioTutorialRuntimeType(RadioTutorialManagerTypeName);
+            PropertyInfo property = managerType.GetProperty(
+                "ActiveTutorialId",
+                BindingFlags.Public | BindingFlags.Static);
+            Assert.That(property, Is.Not.Null,
+                "RadioTutorialManager.ActiveTutorialId is not an accessible public static property.");
+            Assert.That(property.PropertyType, Is.EqualTo(typeof(string)),
+                "RadioTutorialManager.ActiveTutorialId is not a string property.");
+            return (string)property.GetValue(null);
+        }
+
+        private static bool IsRadioTutorialCompletedThisSession(string tutorialId)
+        {
+            Type managerType = GetRadioTutorialRuntimeType(RadioTutorialManagerTypeName);
+            MethodInfo method = managerType.GetMethod(
+                "IsCompletedThisSession",
+                BindingFlags.Public | BindingFlags.Static,
+                null,
+                new[] { typeof(string) },
+                null);
+            Assert.That(method, Is.Not.Null,
+                "RadioTutorialManager.IsCompletedThisSession(string) is not accessible.");
+            Assert.That(method.ReturnType, Is.EqualTo(typeof(bool)),
+                "RadioTutorialManager.IsCompletedThisSession does not return bool.");
+            return (bool)method.Invoke(null, new object[] { tutorialId });
+        }
+
+        private static bool IsDialogueOwnedBy(string ownerId)
+        {
+            Type managerType = GetRadioTutorialRuntimeType(DialogueManagerTypeName);
+            MethodInfo method = managerType.GetMethod(
+                "IsDialogueOwnedBy",
+                BindingFlags.Public | BindingFlags.Static,
+                null,
+                new[] { typeof(string) },
+                null);
+            Assert.That(method, Is.Not.Null,
+                "DialogueManager.IsDialogueOwnedBy(string) is not accessible.");
+            Assert.That(method.ReturnType, Is.EqualTo(typeof(bool)),
+                "DialogueManager.IsDialogueOwnedBy does not return bool.");
+            return (bool)method.Invoke(null, new object[] { ownerId });
+        }
+
+        private static Component FindRadioTutorialMarker()
+        {
+            Type markerType = GetRadioTutorialRuntimeType(RadioTutorialMarkerTypeName);
+            UnityEngine.Object[] markers = UnityEngine.Object.FindObjectsOfType(markerType);
+            Assert.That(markers.Length, Is.EqualTo(1),
+                $"Expected exactly one active radio tutorial marker in MUELLE; found {markers.Length}.");
+            return markers[0] as Component;
+        }
+
+        private static Type GetRadioTutorialRuntimeType(string assemblyQualifiedName)
+        {
+            Type runtimeType = Type.GetType(assemblyQualifiedName, false);
+            Assert.That(runtimeType, Is.Not.Null,
+                $"Could not resolve runtime tutorial type '{assemblyQualifiedName}'.");
+            return runtimeType;
         }
 
         private static IEnumerator WaitForCameraToStabilize(Camera camera)
