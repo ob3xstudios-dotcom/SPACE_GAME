@@ -228,6 +228,15 @@ namespace Game.Input
                     ""processors"": """",
                     ""interactions"": ""Press"",
                     ""initialStateCheck"": false
+                },
+                {
+                    ""name"": ""Pause"",
+                    ""type"": ""Button"",
+                    ""id"": ""b676af6a-733d-4cb4-8be5-0356e81e3a21"",
+                    ""expectedControlType"": """",
+                    ""processors"": """",
+                    ""interactions"": ""Press"",
+                    ""initialStateCheck"": false
                 }
             ],
             ""bindings"": [
@@ -586,7 +595,7 @@ namespace Game.Input
                 {
                     ""name"": """",
                     ""id"": ""d1e9d8aa-0e4a-43b0-bbb3-629b32b1ff03"",
-                    ""path"": ""<Gamepad>/start"",
+                    ""path"": ""<Gamepad>/dpad/up"",
                     ""interactions"": """",
                     ""processors"": """",
                     ""groups"": """",
@@ -703,6 +712,28 @@ namespace Game.Input
                     ""action"": ""DolphinDive"",
                     ""isComposite"": false,
                     ""isPartOfComposite"": false
+                },
+                {
+                    ""name"": """",
+                    ""id"": ""51f331cc-890e-4e25-af53-5fb281f1fc75"",
+                    ""path"": ""<Keyboard>/escape"",
+                    ""interactions"": """",
+                    ""processors"": """",
+                    ""groups"": """",
+                    ""action"": ""Pause"",
+                    ""isComposite"": false,
+                    ""isPartOfComposite"": false
+                },
+                {
+                    ""name"": """",
+                    ""id"": ""f010b2d8-acde-493d-90ca-84afeea89dd8"",
+                    ""path"": ""<Gamepad>/start"",
+                    ""interactions"": """",
+                    ""processors"": """",
+                    ""groups"": """",
+                    ""action"": ""Pause"",
+                    ""isComposite"": false,
+                    ""isPartOfComposite"": false
                 }
             ]
         }
@@ -726,6 +757,7 @@ namespace Game.Input
             m_Gameplay_Cape = m_Gameplay.FindAction("Cape", throwIfNotFound: true);
             m_Gameplay_CameraLook = m_Gameplay.FindAction("CameraLook", throwIfNotFound: true);
             m_Gameplay_DolphinDive = m_Gameplay.FindAction("DolphinDive", throwIfNotFound: true);
+            m_Gameplay_Pause = m_Gameplay.FindAction("Pause", throwIfNotFound: true);
         }
 
         ~@PlayerInputActions()
@@ -821,6 +853,7 @@ namespace Game.Input
         private readonly InputAction m_Gameplay_Cape;
         private readonly InputAction m_Gameplay_CameraLook;
         private readonly InputAction m_Gameplay_DolphinDive;
+        private readonly InputAction m_Gameplay_Pause;
         /// <summary>
         /// Provides access to input actions defined in input action map "Gameplay".
         /// </summary>
@@ -893,6 +926,10 @@ namespace Game.Input
             /// </summary>
             public InputAction @DolphinDive => m_Wrapper.m_Gameplay_DolphinDive;
             /// <summary>
+            /// Provides access to the underlying input action "Gameplay/Pause".
+            /// </summary>
+            public InputAction @Pause => m_Wrapper.m_Gameplay_Pause;
+            /// <summary>
             /// Provides access to the underlying input action map instance.
             /// </summary>
             public InputActionMap Get() { return m_Wrapper.m_Gameplay; }
@@ -963,6 +1000,9 @@ namespace Game.Input
                 @DolphinDive.started += instance.OnDolphinDive;
                 @DolphinDive.performed += instance.OnDolphinDive;
                 @DolphinDive.canceled += instance.OnDolphinDive;
+                @Pause.started += instance.OnPause;
+                @Pause.performed += instance.OnPause;
+                @Pause.canceled += instance.OnPause;
             }
 
             /// <summary>
@@ -1019,6 +1059,9 @@ namespace Game.Input
                 @DolphinDive.started -= instance.OnDolphinDive;
                 @DolphinDive.performed -= instance.OnDolphinDive;
                 @DolphinDive.canceled -= instance.OnDolphinDive;
+                @Pause.started -= instance.OnPause;
+                @Pause.performed -= instance.OnPause;
+                @Pause.canceled -= instance.OnPause;
             }
 
             /// <summary>
@@ -1164,6 +1207,13 @@ namespace Game.Input
             /// <seealso cref="UnityEngine.InputSystem.InputAction.performed" />
             /// <seealso cref="UnityEngine.InputSystem.InputAction.canceled" />
             void OnDolphinDive(InputAction.CallbackContext context);
+            /// <summary>
+            /// Method invoked when associated input action "Pause" is either <see cref="UnityEngine.InputSystem.InputAction.started" />, <see cref="UnityEngine.InputSystem.InputAction.performed" /> or <see cref="UnityEngine.InputSystem.InputAction.canceled" />.
+            /// </summary>
+            /// <seealso cref="UnityEngine.InputSystem.InputAction.started" />
+            /// <seealso cref="UnityEngine.InputSystem.InputAction.performed" />
+            /// <seealso cref="UnityEngine.InputSystem.InputAction.canceled" />
+            void OnPause(InputAction.CallbackContext context);
         }
     }
 }

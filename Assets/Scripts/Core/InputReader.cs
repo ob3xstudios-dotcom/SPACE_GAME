@@ -1,4 +1,5 @@
 ﻿using UnityEngine;
+using UnityEngine.EventSystems;
 using UnityEngine.InputSystem;
 
 namespace Game.Input
@@ -134,16 +135,7 @@ namespace Game.Input
 
         private void OnDisable()
         {
-            ResetCrouchPressTracking();
-            ResetStealthWalkHeld();
-            ClearSwingGrabBuffer();
-            SprintHeld = false;
-            CapeHeld = false;
-            CameraLookInput = Vector2.zero;
-            MoveInputIsGamepad = false;
-            mapPressed = false;
-            skillsPressed = false;
-            dolphinDivePressedFrame = -1;
+            ClearGameplayInputState();
 
             if (actions == null) return;
 
@@ -180,6 +172,29 @@ namespace Game.Input
             actions.Disable();
 
             if (debugInput) Debug.Log("[INPUT] DISABLED");
+        }
+
+        public void ClearGameplayInputState()
+        {
+            MoveInput = Vector2.zero;
+            CameraLookInput = Vector2.zero;
+            MoveInputIsGamepad = false;
+            JumpHeld = false;
+            SprintHeld = false;
+            CapeHeld = false;
+            ResetStealthWalkHeld();
+
+            jumpPressed = false;
+            attackPressed = false;
+            dashPressed = false;
+            parryPressed = false;
+            interactPressed = false;
+            mapPressed = false;
+            skillsPressed = false;
+            dolphinDivePressedFrame = -1;
+
+            ResetCrouchPressTracking();
+            ClearSwingGrabBuffer();
         }
 
         private void OnDestroy()
@@ -666,6 +681,16 @@ namespace Game.Input
 
         private void OnSkillsStarted(InputAction.CallbackContext ctx)
         {
+            bool dpadUpNavigation =
+                ctx.control != null &&
+                ctx.control.path.EndsWith("/dpad/up", System.StringComparison.OrdinalIgnoreCase) &&
+                !Game.Progression.AbilityLoadoutUI.IsAnyOpen &&
+                EventSystem.current != null &&
+                EventSystem.current.currentSelectedGameObject != null &&
+                EventSystem.current.currentSelectedGameObject.activeInHierarchy;
+            if (dpadUpNavigation)
+                return;
+
             skillsPressed = true;
             LogMenuInput("SKILLS", ctx);
         }

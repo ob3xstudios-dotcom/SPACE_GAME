@@ -12,6 +12,8 @@ namespace Game.Systems
         private float restoreTimeScale = 1f;
         private float stopUntilRealtime;
         private Coroutine hitStopCo;
+        private bool externalPauseActive;
+        private float externalPauseRestoreTimeScale = 1f;
 
         public static void Request(float seconds)
         {
@@ -26,9 +28,11 @@ namespace Game.Systems
 
         public static void CancelAll()
         {
-            Time.timeScale = 1f;
-
-            if (instance == null) return;
+            if (instance == null)
+            {
+                Time.timeScale = 1f;
+                return;
+            }
 
             if (instance.hitStopCo != null)
             {
@@ -38,6 +42,14 @@ namespace Game.Systems
 
             instance.stopUntilRealtime = 0f;
             instance.restoreTimeScale = 1f;
+            Time.timeScale = instance.externalPauseActive
+                ? 0f
+                : instance.externalPauseRestoreTimeScale;
+        }
+
+        public static void SetExternalPause(bool paused)
+        {
+            GetOrCreate().SetExternalPauseInternal(paused);
         }
 
         private static HitStopManager GetOrCreate()
@@ -84,9 +96,33 @@ namespace Game.Systems
 
             if (hitStopCo != null) return;
 
-            restoreTimeScale = Time.timeScale <= 0f ? 1f : Time.timeScale;
+            restoreTimeScale = externalPauseActive
+                ? externalPauseRestoreTimeScale
+                : Time.timeScale <= 0f ? 1f : Time.timeScale;
             Time.timeScale = 0f;
             hitStopCo = StartCoroutine(HitStopRoutine());
+        }
+
+        private void SetExternalPauseInternal(bool paused)
+        {
+            if (externalPauseActive == paused)
+                return;
+
+            if (paused)
+            {
+                externalPauseRestoreTimeScale = Time.timeScale > 0f
+                    ? Time.timeScale
+                    : hitStopCo != null ? restoreTimeScale : 1f;
+                externalPauseActive = true;
+                Time.timeScale = 0f;
+                return;
+            }
+
+            externalPauseActive = false;
+            if (hitStopCo == null)
+                Time.timeScale = externalPauseRestoreTimeScale;
+            else
+                restoreTimeScale = externalPauseRestoreTimeScale;
         }
 
         private IEnumerator HitStopRoutine()
@@ -94,7 +130,8 @@ namespace Game.Systems
             while (Time.unscaledTime < stopUntilRealtime)
                 yield return null;
 
-            Time.timeScale = restoreTimeScale <= 0f ? 1f : restoreTimeScale;
+            if (!externalPauseActive)
+                Time.timeScale = restoreTimeScale <= 0f ? 1f : restoreTimeScale;
             hitStopCo = null;
         }
     }

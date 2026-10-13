@@ -39,6 +39,7 @@ namespace Game.Progression
         private bool readOnlyMode;
         private bool ownsExternalControlLock;
 
+        public static bool IsAnyOpen => instance != null && instance.IsOpen;
         public bool IsOpen => panelRoot != null && panelRoot.activeSelf && draft != null;
 
         private void Awake()

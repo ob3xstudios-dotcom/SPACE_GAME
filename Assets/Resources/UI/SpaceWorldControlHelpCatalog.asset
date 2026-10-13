@@ -1,0 +1,160 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: faec8d8b66253a149b515de212f6f062, type: 3}
+  m_Name: SpaceWorldControlHelpCatalog
+  m_EditorClassIdentifier: 
+  entries:
+  - actionName: Move
+    displayName: MOVIMIENTO
+    description: "Desplaza al personaje y aporta la direcci\xF3n usada por varias
+      acciones contextuales."
+    inputType: "Mantener / direcci\xF3n anal\xF3gica."
+    condition: Disponible durante el control normal del personaje.
+    context: "Exploraci\xF3n y combate."
+    notes: "El stick izquierdo permite controlar tambi\xE9n la intensidad de marcha
+      sigilosa."
+    category: 0
+  - actionName: Jump
+    displayName: SALTO
+    description: Salta, ejecuta Wall Jump cuando corresponde y permite abandonar
+      ciertos elementos de traversal.
+    inputType: "Pulsaci\xF3n."
+    condition: Respeta suelo, coyote time, Wall Slide y las habilidades equipadas.
+    context: "Exploraci\xF3n y traversal."
+    notes: Una habilidad equipada puede habilitar un segundo salto.
+    category: 0
+  - actionName: Dash
+    displayName: DASH
+    description: "Ejecuta el impulso r\xE1pido en la direcci\xF3n v\xE1lida actual."
+    inputType: "Pulsaci\xF3n."
+    condition: "Requiere que Dash est\xE9 disponible y cumplir sus reglas de stamina
+      y recarga."
+    context: "Exploraci\xF3n y combate."
+    notes: "No altera sus costes ni tiempos desde este men\xFA."
+    category: 0
+  - actionName: Sprint
+    displayName: SPRINT
+    description: "Mantiene la carrera r\xE1pida mientras haya reserva de sprint."
+    inputType: Mantener.
+    condition: Requiere movimiento y reserva de sprint disponible.
+    context: "Exploraci\xF3n."
+    notes: Durante Sprint habilita Slide y Dolphin Dive.
+    category: 0
+  - actionName: Attack
+    displayName: ATAQUE
+    description: "Realiza el ataque correspondiente a la direcci\xF3n y al estado
+      del personaje."
+    inputType: "Pulsaci\xF3n."
+    condition: "Sujeto a las reglas actuales de ataque y cancelaci\xF3n."
+    context: Combate.
+    notes: "En el aire, la direcci\xF3n descendente inicia el ataque hacia abajo
+      sostenido."
+    category: 1
+  - actionName: Parry
+    displayName: PARRY
+    description: "Intenta desviar un ataque enemigo dentro de la ventana v\xE1lida."
+    inputType: "Pulsaci\xF3n."
+    condition: Solo tiene efecto cuando el estado y la ventana de parry lo permiten.
+    context: Combate.
+    notes: Respeta los bloqueos y cooldowns existentes.
+    category: 1
+  - actionName: Interact
+    displayName: INTERACTUAR
+    description: "Activa la interacci\xF3n disponible m\xE1s cercana, incluidos di\xE1logos,
+      bancos y objetos compatibles."
+    inputType: "Pulsaci\xF3n."
+    condition: "Debe existir una interacci\xF3n v\xE1lida al alcance."
+    context: "Exploraci\xF3n."
+    notes: "En un banco tambi\xE9n puede utilizarse para abandonar el asiento."
+    category: 3
+  - actionName: Crouch
+    displayName: AGACHARSE / SLIDE / LAYDOWN
+    description: "Cambia de postura. Una pulsaci\xF3n durante Sprint inicia Slide;
+      mantener permite pasar a LayDown."
+    inputType: "Pulsaci\xF3n, mantener o combinaci\xF3n."
+    condition: "Slide requiere Sprint v\xE1lido; los cambios de postura requieren
+      espacio f\xEDsico suficiente."
+    context: "Exploraci\xF3n y evasi\xF3n."
+    notes: "Al acabar un Slide bajo techo bajo, el personaje adopta LayDown autom\xE1ticamente."
+    category: 0
+  - actionName: StealthWalk
+    displayName: MARCHA SIGILOSA
+    description: "Reduce la intensidad de movimiento para avanzar con m\xE1s control."
+    inputType: Mantener.
+    condition: "Disponible durante la locomoci\xF3n normal."
+    context: "Exploraci\xF3n."
+    notes: "Con mando, una inclinaci\xF3n suave del stick izquierdo cumple esta funci\xF3n."
+    category: 0
+  - actionName: SwingGrab
+    displayName: AGARRE / TRAVERSAL
+    description: Solicita el agarre de cuerdas, SwingPole y elementos de traversal
+      compatibles.
+    inputType: "Pulsaci\xF3n."
+    condition: "Requiere estar dentro de una zona de agarre v\xE1lida."
+    context: Traversal.
+    notes: "Tambi\xE9n se usa en los puntos de agarre de cornisa configurados."
+    category: 2
+  - actionName: Cape
+    displayName: CAPA
+    description: Extiende la capa mientras se mantiene la entrada.
+    inputType: Mantener.
+    condition: Su efecto depende del estado del personaje y de corrientes ascendentes
+      compatibles.
+    context: Traversal.
+    notes: "Al soltar el bot\xF3n, la capa se repliega."
+    category: 2
+  - actionName: CameraLook
+    displayName: MIRAR
+    description: Desplaza temporalmente el encuadre sin mover al personaje.
+    inputType: "Mantener direcci\xF3n."
+    condition: "Disponible cuando ning\xFAn control de c\xE1mara de mayor prioridad
+      est\xE1 activo."
+    context: "Exploraci\xF3n."
+    notes: "La c\xE1mara vuelve suavemente al seguimiento habitual al soltar la entrada."
+    category: 4
+  - actionName: DolphinDive
+    displayName: DOLPHIN DIVE
+    description: El personaje realiza una zambullida hacia delante.
+    inputType: "Pulsaci\xF3n y combinaci\xF3n con Sprint."
+    condition: "Solo disponible durante un Sprint v\xE1lido."
+    context: Movimiento.
+    notes: "Se ejecuta inmediatamente y contin\xFAa hacia Prone / Prone Slide seg\xFAn
+      el aterrizaje."
+    category: 0
+  - actionName: Map
+    displayName: MAPA
+    description: Abre o cierra el mapa del mundo.
+    inputType: "Pulsaci\xF3n."
+    condition: Requiere haber obtenido el mapa y que ninguna interfaz incompatible
+      tenga el control.
+    context: "Exploraci\xF3n."
+    notes: "El mapa conserva su sistema actual de exploraci\xF3n."
+    category: 4
+  - actionName: Skills
+    displayName: HABILIDADES
+    description: Abre la consulta de habilidades equipadas. Sentado en un banco permite
+      modificar el equipamiento.
+    inputType: "Pulsaci\xF3n."
+    condition: "La edici\xF3n solo est\xE1 permitida mientras se descansa en un banco."
+    context: "Progresi\xF3n."
+    notes: "Las habilidades equipadas funcionan durante el gameplay sin mantener
+      este bot\xF3n."
+    category: 4
+  - actionName: Pause
+    displayName: PAUSA
+    description: "Abre el men\xFA de pausa o retrocede dentro de sus pantallas."
+    inputType: "Pulsaci\xF3n."
+    condition: Durante una escena jugable.
+    context: Sistema.
+    notes: "Detiene gameplay y f\xEDsicas, pero mantiene activa la navegaci\xF3n
+      de interfaz."
+    category: 4
