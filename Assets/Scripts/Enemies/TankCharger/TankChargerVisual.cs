@@ -30,6 +30,7 @@ namespace Game.Enemies.TankCharger
         private SpriteRenderer eyeRenderer;
         private ParticleSystem upperSmoke;
         private ParticleSystem lowerSmoke;
+        private int smokeFacingDirection;
         private TankChargerState previousState;
         private Vector3 baseScale;
         private Quaternion baseLocalRotation;
@@ -64,6 +65,7 @@ namespace Game.Enemies.TankCharger
                 ? baseLocalRotation * Quaternion.Euler(0f, 0f, 180f)
                 : baseLocalRotation;
 
+            UpdateSmokeOrientation(facing);
             UpdateEye();
             UpdateSmoke();
             previousState = owner.CurrentState;
@@ -94,6 +96,8 @@ namespace Game.Enemies.TankCharger
             lowerExhaust = EnsureTransform(lowerExhaust, "LowerExhaust", new Vector3(-0.82f, 0.08f, 0f));
             upperSmoke = EnsureSmokeSystem(upperExhaust);
             lowerSmoke = EnsureSmokeSystem(lowerExhaust);
+            smokeFacingDirection = 0;
+            UpdateSmokeOrientation(owner != null ? owner.FacingDirection : 1);
         }
 
         private void EnsureRuntimeResources()
@@ -200,6 +204,8 @@ namespace Game.Enemies.TankCharger
             if (smoke == null)
                 smoke = exhaust.gameObject.AddComponent<ParticleSystem>();
 
+            smoke.Stop(true, ParticleSystemStopBehavior.StopEmittingAndClear);
+
             ParticleSystem.MainModule main = smoke.main;
             main.duration = 1f;
             main.loop = true;
@@ -260,7 +266,6 @@ namespace Game.Enemies.TankCharger
             if (smokeMaterial != null)
                 renderer.sharedMaterial = smokeMaterial;
 
-            smoke.Stop(true, ParticleSystemStopBehavior.StopEmittingAndClear);
             return smoke;
         }
 
@@ -314,6 +319,33 @@ namespace Game.Enemies.TankCharger
                 EmitSmokeBurst(upperSmoke);
                 EmitSmokeBurst(lowerSmoke);
             }
+        }
+
+        private void UpdateSmokeOrientation(int facing)
+        {
+            int normalizedFacing = facing < 0 ? -1 : 1;
+            if (smokeFacingDirection == normalizedFacing)
+                return;
+
+            smokeFacingDirection = normalizedFacing;
+            OrientSmokeSystem(upperSmoke, normalizedFacing);
+            OrientSmokeSystem(lowerSmoke, normalizedFacing);
+        }
+
+        private static void OrientSmokeSystem(ParticleSystem smoke, int facing)
+        {
+            if (smoke == null)
+                return;
+
+            Transform smokeTransform = smoke.transform;
+            Vector3 localScale = smokeTransform.localScale;
+            localScale.x = Mathf.Abs(localScale.x) * facing;
+            smokeTransform.localScale = localScale;
+
+            ParticleSystem.VelocityOverLifetimeModule velocity = smoke.velocityOverLifetime;
+            velocity.x = facing > 0
+                ? new ParticleSystem.MinMaxCurve(-0.45f, -0.18f)
+                : new ParticleSystem.MinMaxCurve(0.18f, 0.45f);
         }
 
         private void SetSmokeIntensity(float intensity)

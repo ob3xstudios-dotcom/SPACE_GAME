@@ -76,6 +76,10 @@ namespace Game.Enemies.TankCharger
         [SerializeField] private Vector2 chargeHitboxOffset = new Vector2(0.85f, 0f);
         [SerializeField] private Vector2 chargeHitboxSize = new Vector2(0.7f, 0.9f);
 
+        [Header("Player Impact Rebound")]
+        [SerializeField, Min(0.1f)] private float playerImpactReboundSpeed = 4f;
+        [SerializeField, Min(0.05f)] private float playerImpactReboundDuration = 0.25f;
+
         [Header("Hit Reaction")]
         [SerializeField, Min(0f)] private float hitStunDuration = 0.35f;
         [SerializeField, Min(0f)] private float hitKnockbackHorizontal = 3.5f;
@@ -107,6 +111,8 @@ namespace Game.Enemies.TankCharger
         private float currentChargeSpeed;
         private bool hasVisualChargeTarget;
         private bool hitLoggedThisCharge;
+        private bool playerImpactReboundActive;
+        private int playerImpactReboundDirection;
         private PlayerStandableSurface standableSurface;
         private Collider2D playerBodyCollider;
         private Health health;
@@ -186,10 +192,14 @@ namespace Game.Enemies.TankCharger
             sensors.SetExternalFacingDirection(facingDirection);
             sensors.TickVision(body.position);
 
-            if (!hitLoggedThisCharge && chargeHitbox != null && chargeHitbox.HitCountThisActivation > 0)
+            if (CurrentState == TankChargerState.Charging &&
+                !hitLoggedThisCharge &&
+                chargeHitbox != null &&
+                chargeHitbox.HitCountThisActivation > 0)
             {
                 hitLoggedThisCharge = true;
                 LogPlayerHit();
+                BeginPlayerImpactRebound();
             }
 
             switch (CurrentState)
@@ -214,6 +224,14 @@ namespace Game.Enemies.TankCharger
                     break;
 
                 case TankChargerState.Recovery:
+                    if (playerImpactReboundActive)
+                    {
+                        stateTimer += Time.deltaTime;
+                        if (stateTimer >= playerImpactReboundDuration)
+                            FinishPlayerImpactRebound();
+                        break;
+                    }
+
                     stateTimer += Time.deltaTime;
                     if (stateTimer >= recoveryDuration)
                     {
@@ -237,8 +255,13 @@ namespace Game.Enemies.TankCharger
                     UpdatePatrol();
                     break;
                 case TankChargerState.Windup:
-                case TankChargerState.Recovery:
                     StopHorizontal(chargeAcceleration);
+                    break;
+                case TankChargerState.Recovery:
+                    if (playerImpactReboundActive)
+                        UpdatePlayerImpactReboundMovement();
+                    else
+                        StopHorizontal(chargeAcceleration);
                     break;
                 case TankChargerState.BellyUp:
                     UpdateBellyUpMovement();
@@ -409,6 +432,7 @@ namespace Game.Enemies.TankCharger
                 : windupTargetX;
             currentChargeSpeed = 0f;
             hitLoggedThisCharge = false;
+            playerImpactReboundActive = false;
 
             if (chargeHitbox != null)
             {
@@ -508,6 +532,45 @@ namespace Game.Enemies.TankCharger
             body.velocity = new Vector2(chargeDirection * currentChargeSpeed, body.velocity.y);
         }
 
+        private void BeginPlayerImpactRebound()
+        {
+            if (CurrentState != TankChargerState.Charging)
+                return;
+
+            if (chargeHitbox != null)
+                chargeHitbox.DisableHitbox();
+
+            currentChargeSpeed = 0f;
+            cooldownTimer = chargeCooldown;
+            playerImpactReboundDirection = -chargeDirection;
+            playerImpactReboundActive = true;
+            body.velocity = new Vector2(
+                playerImpactReboundDirection * playerImpactReboundSpeed,
+                body.velocity.y);
+            TransitionTo(TankChargerState.Recovery);
+            LogChargeEnd("PlayerImpact");
+        }
+
+        private void UpdatePlayerImpactReboundMovement()
+        {
+            float deceleration = playerImpactReboundSpeed / playerImpactReboundDuration;
+            body.velocity = new Vector2(
+                Mathf.MoveTowards(body.velocity.x, 0f, deceleration * Time.fixedDeltaTime),
+                body.velocity.y);
+        }
+
+        private void FinishPlayerImpactRebound()
+        {
+            if (!playerImpactReboundActive)
+                return;
+
+            playerImpactReboundActive = false;
+            body.velocity = new Vector2(0f, body.velocity.y);
+            patrolDirection = playerImpactReboundDirection;
+            SetFacing(patrolDirection);
+            TransitionTo(TankChargerState.Patrolling);
+        }
+
         private void EndCharge(string reason)
         {
             if (CurrentState != TankChargerState.Charging)
@@ -516,6 +579,7 @@ namespace Game.Enemies.TankCharger
             if (chargeHitbox != null)
                 chargeHitbox.DisableHitbox();
 
+            playerImpactReboundActive = false;
             currentChargeSpeed = 0f;
             body.velocity = new Vector2(0f, body.velocity.y);
             cooldownTimer = chargeCooldown;
@@ -763,6 +827,9 @@ namespace Game.Enemies.TankCharger
 
         private void TransitionTo(TankChargerState nextState)
         {
+            if (nextState != TankChargerState.Recovery)
+                playerImpactReboundActive = false;
+
             CurrentState = nextState;
             stateTimer = 0f;
         }
@@ -793,6 +860,7 @@ namespace Game.Enemies.TankCharger
                 health.OnDamaged -= HandleDamaged;
             if (chargeHitbox != null)
                 chargeHitbox.DisableHitbox();
+            playerImpactReboundActive = false;
             if (standableSurface != null)
                 standableSurface.SetMovementDelta(Vector2.zero);
         }
@@ -821,6 +889,8 @@ namespace Game.Enemies.TankCharger
             damage = 1;
             chargeHitboxSize.x = Mathf.Max(0.01f, chargeHitboxSize.x);
             chargeHitboxSize.y = Mathf.Max(0.01f, chargeHitboxSize.y);
+            playerImpactReboundSpeed = Mathf.Max(0.1f, playerImpactReboundSpeed);
+            playerImpactReboundDuration = Mathf.Max(0.05f, playerImpactReboundDuration);
             hitStunDuration = Mathf.Max(0f, hitStunDuration);
             hitKnockbackHorizontal = Mathf.Max(0f, hitKnockbackHorizontal);
             hitKnockbackVertical = Mathf.Max(0f, hitKnockbackVertical);
