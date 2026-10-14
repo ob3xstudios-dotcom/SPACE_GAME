@@ -1,0 +1,22 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 0d6f6fe2569145e3bd76e4b9e5fbb257, type: 3}
+  m_Name: Puerto117
+  m_EditorClassIdentifier: 
+  regionId: puerto_117
+  displayName: Puerto 117
+  explorationMusic: {fileID: 11400000, guid: c9572cf344414fb4ad3dd3831f1a2097, type: 2}
+  tensionMusic: {fileID: 0}
+  combatMusic: {fileID: 0}
+  eventMusic: {fileID: 0}
+  fallbackToExploration: 1
+  transitionSeconds: 2.5

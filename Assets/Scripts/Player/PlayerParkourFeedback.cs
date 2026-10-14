@@ -1,3 +1,4 @@
+using Game.Audio;
 using UnityEngine;
 
 namespace Game.Player
@@ -7,27 +8,30 @@ namespace Game.Player
     [RequireComponent(typeof(Rigidbody2D))]
     public class PlayerParkourFeedback : MonoBehaviour
     {
+        private const string JumpEventId = "player.movement.jump";
+        private const string LandEventId = "player.movement.land";
+        private const string WallSlideStartEventId = "player.movement.wall_slide.start";
+        private const string WallSlideLoopEventId = "player.movement.wall_slide.loop";
+        private const string WallSlideEndEventId = "player.movement.wall_slide.end";
+        private const string WallJumpEventId = "player.movement.wall_jump";
+        private const string NormalImpactEventId = "player.combat.impact.normal";
+        private const string StrongImpactEventId = "player.combat.impact.strong";
+        private const string ArmoredImpactEventId = "player.combat.impact.armored";
+        private const string ParrySuccessEventId = "player.combat.parry.success";
+        private const string DamageReceivedEventId = "player.combat.damage.received";
+
         [Header("References")]
         [SerializeField] private PlayerController controller;
         [SerializeField] private Rigidbody2D rb;
         [SerializeField] private CapsuleCollider2D capsule;
         [SerializeField] private Transform visualRoot;
         [SerializeField] private SpriteRenderer[] visualRenderers;
-        [SerializeField] private AudioSource audioSource;
 
         [Header("Particles")]
         [SerializeField] private ParticleSystem wallSlideDust;
         [SerializeField] private ParticleSystem wallJumpBurst;
         [SerializeField] private ParticleSystem landBurst;
         [SerializeField] private bool createDefaultParticles = true;
-
-        [Header("Audio Hooks")]
-        [SerializeField] private AudioClip wallSlideStartClip;
-        [SerializeField] private AudioClip wallJumpClip;
-        [SerializeField] private AudioClip landClip;
-        [SerializeField, Range(0f, 1f)] private float wallSlideStartVolume = 0.35f;
-        [SerializeField, Range(0f, 1f)] private float wallJumpVolume = 0.75f;
-        [SerializeField, Range(0f, 1f)] private float landVolume = 0.55f;
 
         [Header("Landing")]
         [SerializeField, Min(0f)] private float minLandingSpeed = 6f;
@@ -46,12 +50,17 @@ namespace Game.Player
         private float lastAirDownSpeed;
         private Quaternion visualBaseRotation;
         private Color[] visualBaseColors;
+        private PlayerParry playerParry;
+        private PlayerHealth playerHealth;
+        private AudioPlaybackHandle wallSlideLoopHandle;
 
         private void Awake()
         {
             if (controller == null) controller = GetComponent<PlayerController>();
             if (rb == null) rb = GetComponent<Rigidbody2D>();
             if (capsule == null) capsule = GetComponent<CapsuleCollider2D>();
+            playerParry = GetComponent<PlayerParry>();
+            playerHealth = GetComponent<PlayerHealth>();
             Transform leanRoot = visualRoot;
             if (leanRoot == null)
             {
@@ -73,9 +82,6 @@ namespace Game.Player
             visualBaseColors = new Color[visualRenderers.Length];
             for (int i = 0; i < visualRenderers.Length; i++)
                 visualBaseColors[i] = visualRenderers[i] != null ? visualRenderers[i].color : Color.white;
-
-            if (audioSource == null) audioSource = GetComponent<AudioSource>();
-            if (audioSource == null) audioSource = gameObject.AddComponent<AudioSource>();
 
             if (visualRoot != null)
             {
@@ -105,13 +111,35 @@ namespace Game.Player
         private void OnEnable()
         {
             if (controller != null)
+            {
+                controller.NormalJumpPerformed += OnNormalJumpPerformed;
                 controller.WallJumped += OnWallJumped;
+                controller.AttackImpactResolved += OnAttackImpactResolved;
+            }
+
+            if (playerParry != null)
+                playerParry.ParrySucceeded += OnParrySucceeded;
+
+            if (playerHealth != null)
+                playerHealth.OnDamaged += OnPlayerDamaged;
         }
 
         private void OnDisable()
         {
             if (controller != null)
+            {
+                controller.NormalJumpPerformed -= OnNormalJumpPerformed;
                 controller.WallJumped -= OnWallJumped;
+                controller.AttackImpactResolved -= OnAttackImpactResolved;
+            }
+
+            if (playerParry != null)
+                playerParry.ParrySucceeded -= OnParrySucceeded;
+
+            if (playerHealth != null)
+                playerHealth.OnDamaged -= OnPlayerDamaged;
+
+            StopWallSlideLoop();
 
             RestoreVisuals();
         }
@@ -147,13 +175,16 @@ namespace Game.Player
 
         private void OnWallSlideStarted()
         {
-            PlayOneShot(wallSlideStartClip, wallSlideStartVolume);
+            AudioService.PlayAt(WallSlideStartEventId, transform.position);
+            wallSlideLoopHandle = StartAttachedLoop(WallSlideLoopEventId);
             if (wallSlideDust != null && !wallSlideDust.isPlaying)
                 wallSlideDust.Play();
         }
 
         private void OnWallSlideStopped()
         {
+            StopWallSlideLoop();
+            AudioService.PlayAt(WallSlideEndEventId, transform.position);
             if (wallSlideDust != null)
                 wallSlideDust.Stop(false, ParticleSystemStopBehavior.StopEmitting);
         }
@@ -164,7 +195,7 @@ namespace Game.Player
             if (wallJumpBurst != null)
                 wallJumpBurst.Play();
 
-            PlayOneShot(wallJumpClip, wallJumpVolume);
+            AudioService.PlayAt(WallJumpEventId, transform.position);
         }
 
         private void OnLanded(float downSpeed)
@@ -175,7 +206,63 @@ namespace Game.Player
             if (landBurst != null)
                 landBurst.Play();
 
-            PlayOneShot(landClip, landVolume);
+            AudioService.PlayAt(LandEventId, transform.position);
+        }
+
+        private void OnNormalJumpPerformed()
+        {
+            AudioService.PlayAt(JumpEventId, transform.position);
+        }
+
+        private void OnAttackImpactResolved(
+            Game.Combat.PlayerAttackResolution resolution,
+            Game.Combat.PlayerAttackDirection direction,
+            Vector2 hitPosition)
+        {
+            string eventId;
+            switch (resolution)
+            {
+                case Game.Combat.PlayerAttackResolution.Armored:
+                    eventId = ArmoredImpactEventId;
+                    break;
+                case Game.Combat.PlayerAttackResolution.BellyUp:
+                    eventId = StrongImpactEventId;
+                    break;
+                default:
+                    eventId = direction == Game.Combat.PlayerAttackDirection.Down
+                        ? StrongImpactEventId
+                        : NormalImpactEventId;
+                    break;
+            }
+
+            AudioService.PlayAt(eventId, hitPosition);
+        }
+
+        private void OnParrySucceeded(Game.Enemies.EnemyBase enemy)
+        {
+            Vector3 position = enemy != null ? enemy.transform.position : transform.position;
+            AudioService.PlayAt(ParrySuccessEventId, position);
+        }
+
+        private void OnPlayerDamaged(int damage)
+        {
+            if (damage > 0)
+                AudioService.PlayAt(DamageReceivedEventId, transform.position);
+        }
+
+        private AudioPlaybackHandle StartAttachedLoop(string eventId)
+        {
+            AudioEventCatalog catalog = AudioService.Instance.Catalog;
+            if (catalog == null || !catalog.TryGet(eventId, out AudioEventDefinition definition))
+                return default;
+
+            return AudioService.StartLoop(definition, transform);
+        }
+
+        private void StopWallSlideLoop()
+        {
+            AudioService.Stop(wallSlideLoopHandle, 0.08f);
+            wallSlideLoopHandle = default;
         }
 
         private void UpdateWallSlideDust(bool wallSliding)
@@ -242,12 +329,6 @@ namespace Game.Player
             Bounds b = capsule.bounds;
             system.transform.position = new Vector3(b.center.x, b.min.y + 0.05f, transform.position.z);
             system.transform.rotation = Quaternion.identity;
-        }
-
-        private void PlayOneShot(AudioClip clip, float volume)
-        {
-            if (clip == null || audioSource == null || volume <= 0f) return;
-            audioSource.PlayOneShot(clip, volume);
         }
 
         private void RestoreVisuals()

@@ -1,4 +1,5 @@
 ﻿using System.Collections;
+using System;
 using UnityEngine;
 using Game.Systems;
 
@@ -48,6 +49,9 @@ namespace Game.Player
         private float cdT;
         private float windowT;
         private float failT;
+
+        public event Action<Game.Enemies.EnemyBase> ParrySucceeded;
+
         private void Awake()
         {
             if (controller == null) controller = GetComponent<PlayerController>();
@@ -176,6 +180,7 @@ namespace Game.Player
                 if (debugLogs)
                     Debug.Log($"[PARRY] SUCCESS on {enemy.name}");
 
+                ParrySucceeded?.Invoke(enemy);
                 return true;
             }
 

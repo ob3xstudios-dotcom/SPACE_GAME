@@ -21,6 +21,11 @@ namespace Game.UI.Menus
         private const string MainMenuSceneName = "MAINMENU";
         private const string FirstGameplaySceneName = "MUELLE";
         private const string CatalogResourcePath = "UI/SpaceWorldControlHelpCatalog";
+        private const string UiSelectionEventId = "ui.navigation.select";
+        private const string UiConfirmEventId = "ui.action.confirm";
+        private const string UiBackEventId = "ui.navigation.back";
+        private const string UiMenuOpenEventId = "ui.menu.open";
+        private const string UiMenuCloseEventId = "ui.menu.close";
 
         private static readonly Color BackgroundColor = new Color(0.012f, 0.035f, 0.075f, 0.97f);
         private static readonly Color PanelColor = new Color(0.035f, 0.09f, 0.16f, 0.94f);
@@ -100,6 +105,7 @@ namespace Game.UI.Menus
         private InputAction suppressedDpadMoveAction;
         private MoveDirection heldDpadDirection = MoveDirection.None;
         private float nextDpadRepeatTime;
+        private GameObject lastSelectedMenuObject;
 
         private MenuScreen currentScreen = MenuScreen.Hidden;
         private MenuScreen optionsReturnScreen = MenuScreen.Main;
@@ -275,6 +281,7 @@ namespace Game.UI.Menus
             if (currentScreen == MenuScreen.Hidden)
             {
                 pendingDpadMoves.Clear();
+                lastSelectedMenuObject = null;
                 return;
             }
 
@@ -292,6 +299,8 @@ namespace Game.UI.Menus
             {
                 SendDpadMove(eventSystem, pendingDpadMoves.Dequeue());
             }
+
+            UpdateSelectionAudio(eventSystem);
         }
 
         private static MoveDirection GetMoveDirection(Vector2 value)
@@ -325,6 +334,28 @@ namespace Game.UI.Menus
                 ExecuteEvents.moveHandler);
         }
 
+        private void UpdateSelectionAudio(EventSystem eventSystem)
+        {
+            GameObject selected = eventSystem != null
+                ? eventSystem.currentSelectedGameObject
+                : null;
+            if (selected == lastSelectedMenuObject)
+                return;
+
+            lastSelectedMenuObject = selected;
+            if (selected != null && selected.activeInHierarchy)
+                Game.Audio.AudioService.Play(UiSelectionEventId);
+        }
+
+        private void PlayUiEvent(string eventId)
+        {
+            EventSystem eventSystem = EventSystem.current;
+            lastSelectedMenuObject = eventSystem != null
+                ? eventSystem.currentSelectedGameObject
+                : null;
+            Game.Audio.AudioService.Play(eventId);
+        }
+
         private float GetDpadRepeatDelay()
         {
             return activeUiInputModule != null
@@ -353,6 +384,7 @@ namespace Game.UI.Menus
             Cursor.visible = true;
             Cursor.lockState = CursorLockMode.None;
             ShowScreen(MenuScreen.Pause);
+            PlayUiEvent(UiMenuOpenEventId);
         }
 
         private void ResumeGameplay()
@@ -360,6 +392,7 @@ namespace Game.UI.Menus
             if (!gameplayPaused)
                 return;
 
+            PlayUiEvent(UiMenuCloseEventId);
             currentScreen = MenuScreen.Hidden;
             menuRoot.SetActive(false);
             ReleaseGameplayPause();
@@ -440,11 +473,13 @@ namespace Game.UI.Menus
         private void OpenOptions(MenuScreen returnScreen)
         {
             optionsReturnScreen = returnScreen;
+            PlayUiEvent(UiMenuOpenEventId);
             ShowScreen(MenuScreen.Options);
         }
 
         private void OpenControls()
         {
+            PlayUiEvent(UiMenuOpenEventId);
             ShowScreen(MenuScreen.Controls);
             RebuildControlView(controlView);
         }
@@ -454,9 +489,11 @@ namespace Game.UI.Menus
             switch (currentScreen)
             {
                 case MenuScreen.Controls:
+                    PlayUiEvent(UiBackEventId);
                     ShowScreen(MenuScreen.Options);
                     break;
                 case MenuScreen.Options:
+                    PlayUiEvent(UiBackEventId);
                     ShowScreen(optionsReturnScreen);
                     break;
                 case MenuScreen.Pause:
@@ -501,7 +538,10 @@ namespace Game.UI.Menus
         {
             yield return null;
             if (target != null && target.activeInHierarchy && EventSystem.current != null)
+            {
+                lastSelectedMenuObject = target;
                 EventSystem.current.SetSelectedGameObject(target);
+            }
         }
 
         private void EnsureEventSystem()
@@ -632,7 +672,7 @@ namespace Game.UI.Menus
 
             mainFirstButton = CreateMenuButton(mainPanel.transform, "JUGAR", new Vector2(0f, 20f), StartGame);
             CreateMenuButton(mainPanel.transform, "OPCIONES", new Vector2(0f, -70f),
-                () => OpenOptions(MenuScreen.Main));
+                () => OpenOptions(MenuScreen.Main), null);
             CreateMenuButton(mainPanel.transform, "SALIR DEL JUEGO", new Vector2(0f, -160f), QuitGame);
         }
 
@@ -641,9 +681,10 @@ namespace Game.UI.Menus
             pausePanel = CreateFullScreenContainer(menuRoot.transform, "PauseMenu");
             CreateText(pausePanel.transform, "Title", "MENÚ", 66, FontStyle.Bold,
                 TextAnchor.MiddleCenter, new Vector2(0.25f, 0.70f), new Vector2(0.75f, 0.86f), Cyan);
-            pauseFirstButton = CreateMenuButton(pausePanel.transform, "CONTINUAR", new Vector2(0f, 30f), ResumeGameplay);
+            pauseFirstButton = CreateMenuButton(
+                pausePanel.transform, "CONTINUAR", new Vector2(0f, 30f), ResumeGameplay, null);
             CreateMenuButton(pausePanel.transform, "OPCIONES", new Vector2(0f, -60f),
-                () => OpenOptions(MenuScreen.Pause));
+                () => OpenOptions(MenuScreen.Pause), null);
             CreateMenuButton(pausePanel.transform, "SALIR AL MENÚ", new Vector2(0f, -150f), ReturnToMainMenu);
         }
 
@@ -652,8 +693,10 @@ namespace Game.UI.Menus
             optionsPanel = CreateFullScreenContainer(menuRoot.transform, "OptionsMenu");
             CreateText(optionsPanel.transform, "Title", "OPCIONES", 64, FontStyle.Bold,
                 TextAnchor.MiddleCenter, new Vector2(0.25f, 0.70f), new Vector2(0.75f, 0.86f), Cyan);
-            optionsFirstButton = CreateMenuButton(optionsPanel.transform, "CONTROLES", new Vector2(0f, 10f), OpenControls);
-            CreateMenuButton(optionsPanel.transform, "VOLVER", new Vector2(0f, -80f), NavigateBack);
+            optionsFirstButton = CreateMenuButton(
+                optionsPanel.transform, "CONTROLES", new Vector2(0f, 10f), OpenControls, null);
+            CreateMenuButton(
+                optionsPanel.transform, "VOLVER", new Vector2(0f, -80f), NavigateBack, null);
             CreateText(optionsPanel.transform, "Future", "AUDIO · VÍDEO · REASIGNACIÓN — PRÓXIMAMENTE", 17, FontStyle.Normal,
                 TextAnchor.MiddleCenter, new Vector2(0.20f, 0.18f), new Vector2(0.80f, 0.26f), MutedText);
         }
@@ -687,7 +730,7 @@ namespace Game.UI.Menus
             controlDetailsText.verticalOverflow = VerticalWrapMode.Overflow;
 
             CreateSmallButton(controlsPanel.transform, "VOLVER",
-                new Vector2(0.80f, 0.055f), new Vector2(0.96f, 0.12f), NavigateBack);
+                new Vector2(0.80f, 0.055f), new Vector2(0.96f, 0.12f), NavigateBack, null);
         }
 
         private void RebuildControlView(ControlView nextView)
@@ -940,7 +983,12 @@ namespace Game.UI.Menus
             };
         }
 
-        private Button CreateMenuButton(Transform parent, string label, Vector2 position, UnityEngine.Events.UnityAction action)
+        private Button CreateMenuButton(
+            Transform parent,
+            string label,
+            Vector2 position,
+            UnityEngine.Events.UnityAction action,
+            string clickAudioEventId = UiConfirmEventId)
         {
             GameObject buttonObject = new GameObject(label, typeof(RectTransform), typeof(Image), typeof(Button));
             buttonObject.transform.SetParent(parent, false);
@@ -948,7 +996,11 @@ namespace Game.UI.Menus
             rect.anchorMin = rect.anchorMax = new Vector2(0.5f, 0.5f);
             rect.sizeDelta = new Vector2(540f, 66f);
             rect.anchoredPosition = position;
-            ConfigureButton(buttonObject.GetComponent<Button>(), buttonObject.GetComponent<Image>(), action);
+            ConfigureButton(
+                buttonObject.GetComponent<Button>(),
+                buttonObject.GetComponent<Image>(),
+                action,
+                clickAudioEventId);
             CreateText(buttonObject.transform, "Label", label, 24, FontStyle.Bold,
                 TextAnchor.MiddleCenter, Vector2.zero, Vector2.one, PaleText).raycastTarget = false;
             return buttonObject.GetComponent<Button>();
@@ -959,7 +1011,8 @@ namespace Game.UI.Menus
             string label,
             Vector2 anchorMin,
             Vector2 anchorMax,
-            UnityEngine.Events.UnityAction action)
+            UnityEngine.Events.UnityAction action,
+            string clickAudioEventId = UiConfirmEventId)
         {
             GameObject buttonObject = new GameObject(label, typeof(RectTransform), typeof(Image), typeof(Button));
             buttonObject.transform.SetParent(parent, false);
@@ -968,13 +1021,21 @@ namespace Game.UI.Menus
             rect.anchorMax = anchorMax;
             rect.offsetMin = Vector2.zero;
             rect.offsetMax = Vector2.zero;
-            ConfigureButton(buttonObject.GetComponent<Button>(), buttonObject.GetComponent<Image>(), action);
+            ConfigureButton(
+                buttonObject.GetComponent<Button>(),
+                buttonObject.GetComponent<Image>(),
+                action,
+                clickAudioEventId);
             CreateText(buttonObject.transform, "Label", label, 18, FontStyle.Bold,
                 TextAnchor.MiddleCenter, Vector2.zero, Vector2.one, PaleText).raycastTarget = false;
             return buttonObject.GetComponent<Button>();
         }
 
-        private static void ConfigureButton(Button button, Image image, UnityEngine.Events.UnityAction action)
+        private void ConfigureButton(
+            Button button,
+            Image image,
+            UnityEngine.Events.UnityAction action,
+            string clickAudioEventId)
         {
             image.color = ButtonColor;
             button.targetGraphic = image;
@@ -987,7 +1048,12 @@ namespace Game.UI.Menus
             colors.fadeDuration = 0.10f;
             button.colors = colors;
             button.navigation = new Navigation { mode = Navigation.Mode.Automatic };
-            button.onClick.AddListener(action);
+            button.onClick.AddListener(() =>
+            {
+                if (!string.IsNullOrEmpty(clickAudioEventId))
+                    PlayUiEvent(clickAudioEventId);
+                action?.Invoke();
+            });
         }
 
         private GameObject CreateFullScreenContainer(Transform parent, string name)

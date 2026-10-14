@@ -658,6 +658,8 @@ namespace Game.Player
 
         public event Action NormalJumpPerformed;
         public event Action<int> WallJumped;
+        public event Action<Game.Combat.PlayerAttackResolution, Game.Combat.PlayerAttackDirection, Vector2>
+            AttackImpactResolved;
 
         // Para Animator (si lo usáis)
         public bool IsCrouching => input != null && input.IsCrouching;
@@ -1927,6 +1929,10 @@ namespace Game.Player
                         resolution,
                         healthBefore,
                         healthAfter);
+                    AttackImpactResolved?.Invoke(
+                        resolution,
+                        attackDirection,
+                        hitCol.bounds.center);
 
                     if (attackDirection == Game.Combat.PlayerAttackDirection.Down &&
                         isCurrentSupport &&
@@ -1967,7 +1973,13 @@ namespace Game.Player
 
                     didHit = true;
                     if (hitEnemy)
+                    {
                         lastAttackHitEnemy = true;
+                        AttackImpactResolved?.Invoke(
+                            Game.Combat.PlayerAttackResolution.Damage,
+                            attackDirection,
+                            hitCol.bounds.center);
+                    }
 
                     if (hitEnemy &&
                         attackDirection == Game.Combat.PlayerAttackDirection.Down)
@@ -1997,6 +2009,10 @@ namespace Game.Player
 
                     didHit = true;
                     lastAttackHitEnemy = true;
+                    AttackImpactResolved?.Invoke(
+                        Game.Combat.PlayerAttackResolution.Damage,
+                        attackDirection,
+                        hitCol.bounds.center);
                     if (attackDirection == Game.Combat.PlayerAttackDirection.Down)
                     {
                         lastAttackAllowsDownBounce = true;

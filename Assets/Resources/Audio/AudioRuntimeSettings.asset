@@ -1,0 +1,26 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: c691cfe73c7d4d248e34e175963715d2, type: 3}
+  m_Name: AudioRuntimeSettings
+  m_EditorClassIdentifier:
+  catalog: {fileID: 11400000, guid: d71979ea7a614a6489a22364810744a5, type: 2}
+  mixer: {fileID: 24100000, guid: c0cfb2a77f6d4d539660b9afbb47fe59, type: 2}
+  masterGroup: {fileID: 24300001, guid: c0cfb2a77f6d4d539660b9afbb47fe59, type: 2}
+  musicGroup: {fileID: 24300002, guid: c0cfb2a77f6d4d539660b9afbb47fe59, type: 2}
+  ambienceGroup: {fileID: 24300003, guid: c0cfb2a77f6d4d539660b9afbb47fe59, type: 2}
+  sfxGroup: {fileID: 24300004, guid: c0cfb2a77f6d4d539660b9afbb47fe59, type: 2}
+  uiGroup: {fileID: 24300005, guid: c0cfb2a77f6d4d539660b9afbb47fe59, type: 2}
+  voiceGroup: {fileID: 24300006, guid: c0cfb2a77f6d4d539660b9afbb47fe59, type: 2}
+  initialPoolSize: 12
+  maximumVoiceCount: 24
+  logMissingAudioOnce: 1
+

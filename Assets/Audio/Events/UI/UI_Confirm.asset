@@ -1,0 +1,35 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 765fa5bd5c6b44d78a5131186f951d4b, type: 3}
+  m_Name: ui_action_confirm
+  m_EditorClassIdentifier:
+  eventId: ui.action.confirm
+  bus: 4
+  clips:
+  - {fileID: 8300000, guid: 8966920c16f24f85858a9e2b23862e41, type: 3}
+  - {fileID: 8300000, guid: a77b74af001243438a43f6cc0f165210, type: 3}
+  selectionMode: 0
+  loop: 0
+  volumeRange: {x: 0.75, y: 0.85}
+  pitchRange: {x: 0.99, y: 1.01}
+  priority: 32
+  maxConcurrentInstances: 2
+  cooldownSeconds: 0.05
+  concurrencyGroup: ui.actions
+  concurrencyMode: 0
+  fadeInSeconds: 0
+  ignoreListenerPause: 1
+  spatialBlend: 0
+  rolloffMode: 0
+  minDistance: 1
+  maxDistance: 25
+

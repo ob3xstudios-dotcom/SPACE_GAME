@@ -1,0 +1,35 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 765fa5bd5c6b44d78a5131186f951d4b, type: 3}
+  m_Name: ui_navigation_select
+  m_EditorClassIdentifier:
+  eventId: ui.navigation.select
+  bus: 4
+  clips:
+  - {fileID: 8300000, guid: c36deec91b7641268ff5a92b2f452511, type: 3}
+  - {fileID: 8300000, guid: f15e493e28a74239b2b4b3ff4fd696e2, type: 3}
+  selectionMode: 0
+  loop: 0
+  volumeRange: {x: 0.65, y: 0.75}
+  pitchRange: {x: 0.98, y: 1.02}
+  priority: 32
+  maxConcurrentInstances: 2
+  cooldownSeconds: 0.04
+  concurrencyGroup: ui.navigation
+  concurrencyMode: 0
+  fadeInSeconds: 0
+  ignoreListenerPause: 1
+  spatialBlend: 0
+  rolloffMode: 0
+  minDistance: 1
+  maxDistance: 25
+
