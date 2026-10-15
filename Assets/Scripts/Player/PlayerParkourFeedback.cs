@@ -1,4 +1,5 @@
 using Game.Audio;
+using Game.World;
 using UnityEngine;
 
 namespace Game.Player
@@ -8,12 +9,33 @@ namespace Game.Player
     [RequireComponent(typeof(Rigidbody2D))]
     public class PlayerParkourFeedback : MonoBehaviour
     {
+        private const string FootstepWalkEventId = "player.movement.footstep.walk";
+        private const string FootstepRunEventId = "player.movement.footstep.run";
         private const string JumpEventId = "player.movement.jump";
         private const string LandEventId = "player.movement.land";
+        private const string HardLandEventId = "player.movement.land.hard";
+        private const string DashEventId = "player.movement.dash";
+        private const string SprintStartEventId = "player.movement.sprint.start";
+        private const string SlideStartEventId = "player.movement.slide.start";
+        private const string SlideLoopEventId = "player.movement.slide.loop";
+        private const string SlideEndEventId = "player.movement.slide.end";
+        private const string DolphinDiveEventId = "player.movement.dolphin_dive";
+        private const string DolphinDiveLoopEventId = "player.movement.dolphin_dive.loop";
         private const string WallSlideStartEventId = "player.movement.wall_slide.start";
         private const string WallSlideLoopEventId = "player.movement.wall_slide.loop";
         private const string WallSlideEndEventId = "player.movement.wall_slide.end";
         private const string WallJumpEventId = "player.movement.wall_jump";
+        private const string RopeGrabEventId = "player.movement.rope.grab";
+        private const string RopeReleaseEventId = "player.movement.rope.release";
+        private const string SwingStartEventId = "player.movement.swing.start";
+        private const string SwingLoopEventId = "player.movement.swing.loop";
+        private const string SwingEndEventId = "player.movement.swing.end";
+        private const string OverheadRailGrabEventId = "player.movement.overhead_rail.grab";
+        private const string OverheadRailLoopEventId = "player.movement.overhead_rail.loop";
+        private const string OverheadRailReleaseEventId = "player.movement.overhead_rail.release";
+        private const string CapeOpenEventId = "player.movement.cape.open";
+        private const string CapeLoopEventId = "player.movement.cape.loop";
+        private const string CapeCloseEventId = "player.movement.cape.close";
         private const string NormalImpactEventId = "player.combat.impact.normal";
         private const string StrongImpactEventId = "player.combat.impact.strong";
         private const string ArmoredImpactEventId = "player.combat.impact.armored";
@@ -37,6 +59,18 @@ namespace Game.Player
         [SerializeField, Min(0f)] private float minLandingSpeed = 6f;
         [SerializeField, Min(0f)] private float hardLandingSpeed = 14f;
 
+        [Header("Footsteps")]
+        [SerializeField, Min(0f)] private float minFootstepSpeed = 0.75f;
+        [SerializeField, Min(0f)] private float runFootstepSpeed = 6f;
+        [SerializeField, Min(0.1f)] private float walkStepDistance = 1.35f;
+        [SerializeField, Min(0.1f)] private float runStepDistance = 1.6f;
+        [SerializeField, Min(0f)] private float minFootstepInterval = 0.12f;
+
+        [Header("Continuous Movement Audio")]
+        [SerializeField, Min(0f)] private float minSwingLoopSpeed = 1.25f;
+        [SerializeField, Min(0f)] private float minOverheadRailLoopSpeed = 0.35f;
+        [SerializeField, Min(0f)] private float minCapeLoopSpeed = 1.25f;
+
         [Header("Wall Slide Visual")]
         [SerializeField] private bool enableWallSlideLean = true;
         [SerializeField, Range(0f, 12f)] private float wallSlideLeanDegrees = 5f;
@@ -47,12 +81,34 @@ namespace Game.Player
 
         private bool wasGrounded;
         private bool wasWallSliding;
+        private bool wasDashing;
+        private bool wasSprinting;
+        private bool wasSwingAttached;
+        private bool wasOverheadRailHanging;
+        private bool wasCapeDeployed;
+        private PlayerController.SprintSlideDiveState previousSlideDiveState;
+        private SwingAttachmentMode previousSwingMode;
+        private bool movementAudioInitialized;
+        private bool movementAudioSuspended;
+        private bool movementAudioBlocked;
         private float lastAirDownSpeed;
+        private float footstepDistance;
+        private float lastFootstepTime = float.NegativeInfinity;
+        private Vector2 previousFootstepPosition;
+        private Vector2 previousGroundPosition;
+        private Collider2D sampledGroundCollider;
+        private FootstepAudioSurface2D sampledFootstepSurface;
         private Quaternion visualBaseRotation;
         private Color[] visualBaseColors;
         private PlayerParry playerParry;
         private PlayerHealth playerHealth;
+        private PlayerUpdraftCape updraftCape;
         private AudioPlaybackHandle wallSlideLoopHandle;
+        private AudioPlaybackHandle slideLoopHandle;
+        private AudioPlaybackHandle dolphinDiveLoopHandle;
+        private AudioPlaybackHandle swingLoopHandle;
+        private AudioPlaybackHandle overheadRailLoopHandle;
+        private AudioPlaybackHandle capeLoopHandle;
 
         private void Awake()
         {
@@ -61,6 +117,7 @@ namespace Game.Player
             if (capsule == null) capsule = GetComponent<CapsuleCollider2D>();
             playerParry = GetComponent<PlayerParry>();
             playerHealth = GetComponent<PlayerHealth>();
+            updraftCape = GetComponent<PlayerUpdraftCape>();
             Transform leanRoot = visualRoot;
             if (leanRoot == null)
             {
@@ -121,7 +178,16 @@ namespace Game.Player
                 playerParry.ParrySucceeded += OnParrySucceeded;
 
             if (playerHealth != null)
+            {
                 playerHealth.OnDamaged += OnPlayerDamaged;
+                playerHealth.OnDied += OnPlayerDied;
+                playerHealth.OnRespawned += OnPlayerRespawned;
+            }
+
+            movementAudioBlocked = false;
+            movementAudioSuspended = false;
+            movementAudioInitialized = false;
+            ResetFootstepTracking();
         }
 
         private void OnDisable()
@@ -137,9 +203,14 @@ namespace Game.Player
                 playerParry.ParrySucceeded -= OnParrySucceeded;
 
             if (playerHealth != null)
+            {
                 playerHealth.OnDamaged -= OnPlayerDamaged;
+                playerHealth.OnDied -= OnPlayerDied;
+                playerHealth.OnRespawned -= OnPlayerRespawned;
+            }
 
-            StopWallSlideLoop();
+            StopMovementLoops();
+            ResetFootstepTracking();
 
             RestoreVisuals();
         }
@@ -148,8 +219,96 @@ namespace Game.Player
         {
             if (controller == null || rb == null) return;
 
+            if (movementAudioBlocked)
+            {
+                StopMovementLoops();
+                ResetFootstepTracking();
+                return;
+            }
+
+            if (Time.timeScale <= 0f)
+            {
+                if (!movementAudioSuspended)
+                {
+                    movementAudioSuspended = true;
+                    StopMovementLoops();
+                    ResetFootstepTracking();
+                }
+
+                return;
+            }
+
+            ResolveUpdraftCape();
+
             bool grounded = controller.IsGrounded;
             bool wallSliding = controller.IsWallSliding;
+            bool dashing = controller.IsDashing;
+            bool sprinting = controller.IsSprinting;
+            bool swingAttached = controller.IsSwingAttached;
+            bool overheadRailHanging = controller.IsOverheadRailHanging;
+            SwingAttachmentMode swingMode = controller.ActiveSwingMode;
+            PlayerController.SprintSlideDiveState slideDiveState = controller.SlideDiveState;
+            bool capeDeployed = updraftCape != null && updraftCape.IsDeployed;
+            bool swingMoving = swingAttached && rb.velocity.sqrMagnitude >= minSwingLoopSpeed * minSwingLoopSpeed;
+            bool overheadRailMoving =
+                overheadRailHanging &&
+                rb.velocity.sqrMagnitude >= minOverheadRailLoopSpeed * minOverheadRailLoopSpeed;
+            bool capeMoving = IsCapeMoving(capeDeployed);
+
+            if (!movementAudioInitialized)
+            {
+                movementAudioInitialized = true;
+                wasGrounded = grounded;
+                wasWallSliding = wallSliding;
+                wasDashing = dashing;
+                wasSprinting = sprinting;
+                wasSwingAttached = swingAttached;
+                wasOverheadRailHanging = overheadRailHanging;
+                wasCapeDeployed = capeDeployed;
+                previousSlideDiveState = slideDiveState;
+                previousSwingMode = swingMode;
+                lastAirDownSpeed = grounded ? 0f : Mathf.Max(0f, -rb.velocity.y);
+                ResetFootstepTracking();
+
+                if (wallSliding)
+                    OnWallSlideStarted();
+
+                SynchronizeMovementLoops(
+                    wallSliding,
+                    slideDiveState,
+                    swingMoving,
+                    overheadRailMoving,
+                    capeMoving);
+
+                UpdateWallSlideVisuals(wallSliding);
+                return;
+            }
+
+            if (movementAudioSuspended)
+            {
+                movementAudioSuspended = false;
+                wasGrounded = grounded;
+                wasWallSliding = wallSliding;
+                wasDashing = dashing;
+                wasSprinting = sprinting;
+                wasSwingAttached = swingAttached;
+                wasOverheadRailHanging = overheadRailHanging;
+                wasCapeDeployed = capeDeployed;
+                previousSlideDiveState = slideDiveState;
+                previousSwingMode = swingMode;
+                lastAirDownSpeed = grounded ? 0f : Mathf.Max(0f, -rb.velocity.y);
+                ResetFootstepTracking();
+
+                SynchronizeMovementLoops(
+                    wallSliding,
+                    slideDiveState,
+                    swingMoving,
+                    overheadRailMoving,
+                    capeMoving);
+
+                UpdateWallSlideVisuals(wallSliding);
+                return;
+            }
 
             if (!grounded)
                 lastAirDownSpeed = Mathf.Max(lastAirDownSpeed, -rb.velocity.y);
@@ -159,18 +318,135 @@ namespace Game.Player
             else if (!wallSliding && wasWallSliding)
                 OnWallSlideStopped();
 
-            if (!wasGrounded && grounded)
+            bool justLanded = !wasGrounded && grounded;
+            if (justLanded)
                 OnLanded(lastAirDownSpeed);
 
-            UpdateWallSlideDust(wallSliding);
-            UpdateWallSlideLean(wallSliding);
-            UpdateWallSlideTint(wallSliding);
+            if (dashing && !wasDashing)
+                AudioService.PlayAt(DashEventId, transform.position);
+
+            if (sprinting && !wasSprinting)
+                AudioService.PlayAt(SprintStartEventId, transform.position);
+
+            UpdateSlideDiveAudio(previousSlideDiveState, slideDiveState);
+            UpdateSwingAudio(wasSwingAttached, swingAttached, previousSwingMode, swingMode);
+            UpdateOverheadRailAudio(wasOverheadRailHanging, overheadRailHanging);
+            UpdateCapeAudio(wasCapeDeployed, capeDeployed);
+
+            SynchronizeMovementLoops(
+                wallSliding,
+                slideDiveState,
+                swingMoving,
+                overheadRailMoving,
+                capeMoving);
+
+            UpdateFootsteps(grounded, justLanded, wallSliding, dashing);
+            UpdateWallSlideVisuals(wallSliding);
 
             if (grounded)
                 lastAirDownSpeed = 0f;
 
             wasGrounded = grounded;
             wasWallSliding = wallSliding;
+            wasDashing = dashing;
+            wasSprinting = sprinting;
+            wasSwingAttached = swingAttached;
+            wasOverheadRailHanging = overheadRailHanging;
+            wasCapeDeployed = capeDeployed;
+            previousSlideDiveState = slideDiveState;
+            previousSwingMode = swingMode;
+        }
+
+        private void UpdateSlideDiveAudio(
+            PlayerController.SprintSlideDiveState previousState,
+            PlayerController.SprintSlideDiveState currentState)
+        {
+            if (previousState == currentState) return;
+
+            bool previousWasGroundSlide = IsGroundSlideState(previousState);
+            bool currentIsGroundSlide = IsGroundSlideState(currentState);
+
+            if (previousState == PlayerController.SprintSlideDiveState.Dive &&
+                currentState != PlayerController.SprintSlideDiveState.Dive)
+            {
+                StopDolphinDiveLoop();
+            }
+
+            if (previousWasGroundSlide && !currentIsGroundSlide)
+            {
+                StopSlideLoop();
+                if (currentState != PlayerController.SprintSlideDiveState.Dive)
+                    AudioService.PlayAt(SlideEndEventId, transform.position);
+            }
+
+            if (currentState == PlayerController.SprintSlideDiveState.Slide && !previousWasGroundSlide)
+                AudioService.PlayAt(SlideStartEventId, transform.position);
+
+            if (currentState == PlayerController.SprintSlideDiveState.Dive &&
+                previousState != PlayerController.SprintSlideDiveState.Dive)
+            {
+                AudioService.PlayAt(DolphinDiveEventId, transform.position);
+            }
+        }
+
+        private void UpdateSwingAudio(
+            bool previouslyAttached,
+            bool currentlyAttached,
+            SwingAttachmentMode previousMode,
+            SwingAttachmentMode currentMode)
+        {
+            if (currentlyAttached && !previouslyAttached)
+            {
+                if (currentMode == SwingAttachmentMode.Rope)
+                    AudioService.PlayAt(RopeGrabEventId, transform.position);
+
+                AudioService.PlayAt(SwingStartEventId, transform.position);
+                return;
+            }
+
+            if (!currentlyAttached && previouslyAttached)
+            {
+                StopSwingLoop();
+                AudioService.PlayAt(SwingEndEventId, transform.position);
+                if (previousMode == SwingAttachmentMode.Rope)
+                    AudioService.PlayAt(RopeReleaseEventId, transform.position);
+                return;
+            }
+
+            if (!currentlyAttached || previousMode == currentMode) return;
+
+            if (previousMode == SwingAttachmentMode.Rope)
+                AudioService.PlayAt(RopeReleaseEventId, transform.position);
+            if (currentMode == SwingAttachmentMode.Rope)
+                AudioService.PlayAt(RopeGrabEventId, transform.position);
+        }
+
+        private void UpdateCapeAudio(bool previouslyDeployed, bool currentlyDeployed)
+        {
+            if (currentlyDeployed && !previouslyDeployed)
+            {
+                AudioService.PlayAt(CapeOpenEventId, transform.position);
+                return;
+            }
+
+            if (currentlyDeployed || !previouslyDeployed) return;
+
+            StopCapeLoop();
+            AudioService.PlayAt(CapeCloseEventId, transform.position);
+        }
+
+        private void UpdateOverheadRailAudio(bool previouslyHanging, bool currentlyHanging)
+        {
+            if (currentlyHanging && !previouslyHanging)
+            {
+                AudioService.PlayAt(OverheadRailGrabEventId, transform.position);
+                return;
+            }
+
+            if (currentlyHanging || !previouslyHanging) return;
+
+            StopOverheadRailLoop();
+            AudioService.PlayAt(OverheadRailReleaseEventId, transform.position);
         }
 
         private void OnWallSlideStarted()
@@ -200,13 +476,19 @@ namespace Game.Player
 
         private void OnLanded(float downSpeed)
         {
-            if (downSpeed < minLandingSpeed) return;
+            string eventId = downSpeed < minLandingSpeed
+                ? null
+                : downSpeed >= hardLandingSpeed
+                    ? HardLandEventId
+                    : LandEventId;
+
+            if (string.IsNullOrEmpty(eventId)) return;
 
             PositionAtFeet(landBurst);
             if (landBurst != null)
                 landBurst.Play();
 
-            AudioService.PlayAt(LandEventId, transform.position);
+            AudioService.PlayAt(eventId, transform.position);
         }
 
         private void OnNormalJumpPerformed()
@@ -250,9 +532,88 @@ namespace Game.Player
                 AudioService.PlayAt(DamageReceivedEventId, transform.position);
         }
 
+        private void OnPlayerDied()
+        {
+            movementAudioBlocked = true;
+            StopMovementLoops();
+            ResetFootstepTracking();
+        }
+
+        private void OnPlayerRespawned()
+        {
+            movementAudioBlocked = false;
+            movementAudioSuspended = false;
+            movementAudioInitialized = false;
+            lastAirDownSpeed = 0f;
+            StopMovementLoops();
+            ResetFootstepTracking();
+        }
+
+        private void ResolveUpdraftCape()
+        {
+            if (updraftCape == null)
+                updraftCape = GetComponent<PlayerUpdraftCape>();
+        }
+
+        private bool IsCapeMoving(bool capeDeployed)
+        {
+            if (!capeDeployed || !controller.CanUseUpdraftCapeMotion)
+                return false;
+
+            return (updraftCape != null && updraftCape.IsLiftActive) ||
+                   rb.velocity.sqrMagnitude >= minCapeLoopSpeed * minCapeLoopSpeed;
+        }
+
+        private static bool IsGroundSlideState(PlayerController.SprintSlideDiveState state)
+        {
+            return state == PlayerController.SprintSlideDiveState.Slide ||
+                   state == PlayerController.SprintSlideDiveState.ProneSlide;
+        }
+
+        private void SynchronizeMovementLoops(
+            bool wallSliding,
+            PlayerController.SprintSlideDiveState slideDiveState,
+            bool swingMoving,
+            bool overheadRailMoving,
+            bool capeMoving)
+        {
+            SetAttachedLoop(ref wallSlideLoopHandle, WallSlideLoopEventId, wallSliding, 0.12f);
+            SetAttachedLoop(ref slideLoopHandle, SlideLoopEventId, IsGroundSlideState(slideDiveState), 0.12f);
+            SetAttachedLoop(
+                ref dolphinDiveLoopHandle,
+                DolphinDiveLoopEventId,
+                slideDiveState == PlayerController.SprintSlideDiveState.Dive,
+                0.1f);
+            SetAttachedLoop(ref swingLoopHandle, SwingLoopEventId, swingMoving, 0.12f);
+            SetAttachedLoop(
+                ref overheadRailLoopHandle,
+                OverheadRailLoopEventId,
+                overheadRailMoving,
+                0.1f);
+            SetAttachedLoop(ref capeLoopHandle, CapeLoopEventId, capeMoving, 0.15f);
+        }
+
+        private void SetAttachedLoop(
+            ref AudioPlaybackHandle handle,
+            string eventId,
+            bool shouldPlay,
+            float fadeOutSeconds)
+        {
+            if (shouldPlay)
+            {
+                if (!handle.IsValid)
+                    handle = StartAttachedLoop(eventId);
+                return;
+            }
+
+            AudioService.Stop(handle, fadeOutSeconds);
+            handle = default;
+        }
+
         private AudioPlaybackHandle StartAttachedLoop(string eventId)
         {
-            AudioEventCatalog catalog = AudioService.Instance.Catalog;
+            AudioService service = AudioService.Instance;
+            AudioEventCatalog catalog = service != null ? service.Catalog : null;
             if (catalog == null || !catalog.TryGet(eventId, out AudioEventDefinition definition))
                 return default;
 
@@ -261,8 +622,162 @@ namespace Game.Player
 
         private void StopWallSlideLoop()
         {
-            AudioService.Stop(wallSlideLoopHandle, 0.08f);
+            AudioService.Stop(wallSlideLoopHandle, 0.12f);
             wallSlideLoopHandle = default;
+        }
+
+        private void StopSlideLoop()
+        {
+            AudioService.Stop(slideLoopHandle, 0.12f);
+            slideLoopHandle = default;
+        }
+
+        private void StopDolphinDiveLoop()
+        {
+            AudioService.Stop(dolphinDiveLoopHandle, 0.1f);
+            dolphinDiveLoopHandle = default;
+        }
+
+        private void StopSwingLoop()
+        {
+            AudioService.Stop(swingLoopHandle, 0.12f);
+            swingLoopHandle = default;
+        }
+
+        private void StopOverheadRailLoop()
+        {
+            AudioService.Stop(overheadRailLoopHandle, 0.1f);
+            overheadRailLoopHandle = default;
+        }
+
+        private void StopCapeLoop()
+        {
+            AudioService.Stop(capeLoopHandle, 0.15f);
+            capeLoopHandle = default;
+        }
+
+        private void StopMovementLoops()
+        {
+            StopWallSlideLoop();
+            StopSlideLoop();
+            StopDolphinDiveLoop();
+            StopSwingLoop();
+            StopOverheadRailLoop();
+            StopCapeLoop();
+        }
+
+        private void UpdateFootsteps(
+            bool grounded,
+            bool justLanded,
+            bool wallSliding,
+            bool dashing)
+        {
+            Collider2D groundCollider = controller.CurrentGroundCollider;
+            Vector2 currentPosition = transform.position;
+            Vector2 currentGroundPosition = groundCollider != null
+                ? (Vector2)groundCollider.transform.position
+                : Vector2.zero;
+
+            bool locomotionBlocked =
+                !grounded ||
+                justLanded ||
+                wallSliding ||
+                dashing ||
+                !controller.isActiveAndEnabled ||
+                controller.IsExternalControlLocked ||
+                controller.IsHanging ||
+                controller.IsSwinging ||
+                controller.IsSliding ||
+                controller.IsDiving ||
+                controller.IsPostDiveSliding;
+
+            if (locomotionBlocked || groundCollider != sampledGroundCollider)
+            {
+                SetFootstepSample(groundCollider, currentPosition, currentGroundPosition);
+                footstepDistance = 0f;
+                return;
+            }
+
+            Vector2 playerDelta = currentPosition - previousFootstepPosition;
+            Vector2 groundDelta = groundCollider != null
+                ? currentGroundPosition - previousGroundPosition
+                : Vector2.zero;
+            Vector2 relativeDelta = playerDelta - groundDelta;
+
+            previousFootstepPosition = currentPosition;
+            previousGroundPosition = currentGroundPosition;
+
+            float deltaTime = Mathf.Max(Time.deltaTime, 0.0001f);
+            float relativeSpeed = relativeDelta.magnitude / deltaTime;
+            if (relativeSpeed < minFootstepSpeed)
+            {
+                footstepDistance = 0f;
+                return;
+            }
+
+            bool running = Mathf.Abs(rb.velocity.x) >= runFootstepSpeed;
+            float stepDistance = running ? runStepDistance : walkStepDistance;
+            footstepDistance += relativeDelta.magnitude;
+
+            if (footstepDistance < stepDistance ||
+                Time.time - lastFootstepTime < minFootstepInterval)
+            {
+                return;
+            }
+
+            footstepDistance = Mathf.Repeat(footstepDistance, stepDistance);
+            lastFootstepTime = Time.time;
+
+            AudioEventDefinition surfaceEvent = sampledFootstepSurface != null
+                ? sampledFootstepSurface.GetEvent(running)
+                : null;
+            if (surfaceEvent != null)
+            {
+                AudioService.PlayAt(surfaceEvent, transform.position);
+                return;
+            }
+
+            AudioService.PlayAt(
+                running ? FootstepRunEventId : FootstepWalkEventId,
+                transform.position);
+        }
+
+        private void ResetFootstepTracking()
+        {
+            Collider2D groundCollider = controller != null
+                ? controller.CurrentGroundCollider
+                : null;
+            Vector2 currentPosition = transform.position;
+            Vector2 currentGroundPosition = groundCollider != null
+                ? (Vector2)groundCollider.transform.position
+                : Vector2.zero;
+
+            SetFootstepSample(groundCollider, currentPosition, currentGroundPosition);
+            footstepDistance = 0f;
+        }
+
+        private void SetFootstepSample(
+            Collider2D groundCollider,
+            Vector2 playerPosition,
+            Vector2 groundPosition)
+        {
+            if (sampledGroundCollider != groundCollider)
+            {
+                sampledGroundCollider = groundCollider;
+                sampledFootstepSurface = groundCollider != null
+                    ? groundCollider.GetComponentInParent<FootstepAudioSurface2D>()
+                    : null;
+            }
+
+            previousFootstepPosition = playerPosition;
+            previousGroundPosition = groundPosition;
+        }
+
+        private void UpdateWallSlideVisuals(bool wallSliding)
+        {
+            UpdateWallSlideDust(wallSliding);
+            UpdateWallSlideLean(wallSliding);
+            UpdateWallSlideTint(wallSliding);
         }
 
         private void UpdateWallSlideDust(bool wallSliding)

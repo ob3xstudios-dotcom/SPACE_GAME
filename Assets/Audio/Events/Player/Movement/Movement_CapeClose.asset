@@ -14,11 +14,12 @@ MonoBehaviour:
   m_EditorClassIdentifier:
   eventId: player.movement.cape.close
   bus: 3
-  clips: []
+  clips:
+  - {fileID: 8300000, guid: f240268a685e41a69b6eaca1085e2fed, type: 3}
   selectionMode: 0
   loop: 0
-  volumeRange: {x: 0.8, y: 1}
-  pitchRange: {x: 0.98, y: 1.02}
+  volumeRange: {x: 0.35, y: 0.48}
+  pitchRange: {x: 0.95, y: 1}
   priority: 112
   maxConcurrentInstances: 1
   cooldownSeconds: 0.08

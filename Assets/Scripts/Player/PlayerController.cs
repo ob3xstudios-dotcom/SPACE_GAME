@@ -607,6 +607,7 @@ namespace Game.Player
             currentGroundWoodWorkpiece != null;
         public bool IsAttacking => isAttacking;
         public bool IsDashing => isDashing;
+        public bool IsSprinting => sprintActive;
         public bool IsExternalControlLocked => externalControlLocked;
         public bool IsHanging => isHanging || isFlagSpringPoleAttached;
         public bool IsWallSliding => isWallSliding;
@@ -616,6 +617,7 @@ namespace Game.Player
         public bool IsPushingIntoWall => IsInputPushingIntoWall(wallSide);
         public bool IsCarrying => carriedObject != null;
         public bool IsSwinging => isSwinging || isHandPivotRecovering;
+        public bool IsSwingAttached => isSwinging;
         public SwingAttachmentMode ActiveSwingMode => activeSwingMode;
         public float SwingGrabCoyoteTime => Mathf.Max(0f, swingGrabCoyoteTime);
         public int SwingGrabTemporalVersion => swingGrabTemporalVersion;

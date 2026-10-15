@@ -18,5 +18,5 @@ These files were selected from the original archives kept in `Audio_Staging/`.
 - Source archive SHA-256: `029D734AF1582474EDF3A694D1B0CEBC97C1C152F2F39FA34D4C2BAFC5DE77F8`
 - The package's original `License.txt` is preserved in the `ImpactCandidates` folder.
 
-Only the explicitly selected files are present under `Assets`. Five impact sounds are connected provisionally to confirmed combat events; `impactMetal_light_000.ogg` remains an unassigned evaluation candidate.
+Only the explicitly selected files are present under `Assets`. Five impact sounds are connected provisionally to confirmed combat events; `impactMetal_light_000.ogg` remains an unassigned evaluation candidate. Five `footstep_concrete_00x.ogg` variations from the same Impact Sounds archive are used provisionally as the default walk/run surface set. The package's original `License.txt` is also preserved in the `Movement` folder.
 

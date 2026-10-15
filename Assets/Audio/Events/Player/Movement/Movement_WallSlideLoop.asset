@@ -14,17 +14,18 @@ MonoBehaviour:
   m_EditorClassIdentifier:
   eventId: player.movement.wall_slide.loop
   bus: 3
-  clips: []
+  clips:
+  - {fileID: 8300000, guid: b869cf73c5fb498db8a486e993c3f290, type: 3}
   selectionMode: 0
   loop: 1
-  volumeRange: {x: 0.75, y: 0.9}
+  volumeRange: {x: 0.38, y: 0.5}
   pitchRange: {x: 0.98, y: 1.02}
   priority: 112
   maxConcurrentInstances: 1
   cooldownSeconds: 0
   concurrencyGroup: player.movement.wall_slide.loop
   concurrencyMode: 1
-  fadeInSeconds: 0.05
+  fadeInSeconds: 0.08
   ignoreListenerPause: 0
   spatialBlend: 0.1
   rolloffMode: 0

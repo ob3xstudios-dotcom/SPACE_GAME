@@ -14,11 +14,13 @@ MonoBehaviour:
   m_EditorClassIdentifier:
   eventId: player.movement.dash
   bus: 3
-  clips: []
+  clips:
+  - {fileID: 8300000, guid: 6b4b7574247140468fb8564571fc4502, type: 3}
+  - {fileID: 8300000, guid: 048de3ac4627490a89f7e8a681702761, type: 3}
   selectionMode: 0
   loop: 0
-  volumeRange: {x: 0.85, y: 1}
-  pitchRange: {x: 0.98, y: 1.02}
+  volumeRange: {x: 0.75, y: 0.88}
+  pitchRange: {x: 0.98, y: 1.03}
   priority: 72
   maxConcurrentInstances: 1
   cooldownSeconds: 0.1

@@ -14,10 +14,11 @@ MonoBehaviour:
   m_EditorClassIdentifier:
   eventId: player.movement.land
   bus: 3
-  clips: []
+  clips:
+  - {fileID: 8300000, guid: 05de42ed242e4b75b9af5087a9623028, type: 3}
   selectionMode: 0
   loop: 0
-  volumeRange: {x: 0.85, y: 1}
+  volumeRange: {x: 0.58, y: 0.7}
   pitchRange: {x: 0.97, y: 1.03}
   priority: 96
   maxConcurrentInstances: 2

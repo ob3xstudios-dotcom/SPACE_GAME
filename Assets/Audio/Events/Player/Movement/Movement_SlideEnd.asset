@@ -14,11 +14,12 @@ MonoBehaviour:
   m_EditorClassIdentifier:
   eventId: player.movement.slide.end
   bus: 3
-  clips: []
+  clips:
+  - {fileID: 8300000, guid: 7475a1ea81cf47ab898695bfa587a933, type: 3}
   selectionMode: 0
   loop: 0
-  volumeRange: {x: 0.8, y: 1}
-  pitchRange: {x: 0.98, y: 1.02}
+  volumeRange: {x: 0.45, y: 0.6}
+  pitchRange: {x: 0.97, y: 1.03}
   priority: 112
   maxConcurrentInstances: 1
   cooldownSeconds: 0.08

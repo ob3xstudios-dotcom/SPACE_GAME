@@ -14,11 +14,16 @@ MonoBehaviour:
   m_EditorClassIdentifier:
   eventId: player.movement.footstep.run
   bus: 3
-  clips: []
+  clips:
+  - {fileID: 8300000, guid: 5d189ba4325d4a7a9589fb671944a993, type: 3}
+  - {fileID: 8300000, guid: 17fbbec6b00c47fb995b8d3e50cc0ac5, type: 3}
+  - {fileID: 8300000, guid: 4ea34330026c4d90965db7f21407b86d, type: 3}
+  - {fileID: 8300000, guid: 3db83dbba96e464b99e4123b8f868fbe, type: 3}
+  - {fileID: 8300000, guid: 22b6416dab154380be4c4db84cc629d2, type: 3}
   selectionMode: 0
   loop: 0
-  volumeRange: {x: 0.85, y: 1}
-  pitchRange: {x: 0.97, y: 1.05}
+  volumeRange: {x: 0.68, y: 0.82}
+  pitchRange: {x: 0.98, y: 1.05}
   priority: 128
   maxConcurrentInstances: 2
   cooldownSeconds: 0.08

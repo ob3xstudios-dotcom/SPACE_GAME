@@ -14,11 +14,12 @@ MonoBehaviour:
   m_EditorClassIdentifier:
   eventId: player.movement.rope.grab
   bus: 3
-  clips: []
+  clips:
+  - {fileID: 8300000, guid: b5c0bb1ac7a047b5b280359797595439, type: 3}
   selectionMode: 0
   loop: 0
-  volumeRange: {x: 0.85, y: 1}
-  pitchRange: {x: 0.98, y: 1.02}
+  volumeRange: {x: 0.35, y: 0.48}
+  pitchRange: {x: 0.97, y: 1.02}
   priority: 96
   maxConcurrentInstances: 1
   cooldownSeconds: 0.08

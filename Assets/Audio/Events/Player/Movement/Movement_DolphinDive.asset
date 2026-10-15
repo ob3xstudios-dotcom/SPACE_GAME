@@ -14,11 +14,12 @@ MonoBehaviour:
   m_EditorClassIdentifier:
   eventId: player.movement.dolphin_dive
   bus: 3
-  clips: []
+  clips:
+  - {fileID: 8300000, guid: 4e52813b128d4f219dd700927fedb625, type: 3}
   selectionMode: 0
   loop: 0
-  volumeRange: {x: 0.85, y: 1}
-  pitchRange: {x: 0.98, y: 1.02}
+  volumeRange: {x: 0.7, y: 0.84}
+  pitchRange: {x: 0.98, y: 1.04}
   priority: 80
   maxConcurrentInstances: 1
   cooldownSeconds: 0.1

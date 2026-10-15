@@ -1,0 +1,33 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 765fa5bd5c6b44d78a5131186f951d4b, type: 3}
+  m_Name: player_movement_land_hard
+  m_EditorClassIdentifier:
+  eventId: player.movement.land.hard
+  bus: 3
+  clips:
+  - {fileID: 8300000, guid: 88f9575962a2480192f7f0170322925b, type: 3}
+  selectionMode: 0
+  loop: 0
+  volumeRange: {x: 0.8, y: 0.94}
+  pitchRange: {x: 0.94, y: 1}
+  priority: 88
+  maxConcurrentInstances: 2
+  cooldownSeconds: 0.05
+  concurrencyGroup: player.movement.air
+  concurrencyMode: 1
+  fadeInSeconds: 0
+  ignoreListenerPause: 0
+  spatialBlend: 0.1
+  rolloffMode: 0
+  minDistance: 2
+  maxDistance: 18

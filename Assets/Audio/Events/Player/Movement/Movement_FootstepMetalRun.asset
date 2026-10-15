@@ -1,0 +1,36 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 765fa5bd5c6b44d78a5131186f951d4b, type: 3}
+  m_Name: player_movement_footstep_metal_run
+  m_EditorClassIdentifier:
+  eventId: player.movement.footstep.metal.run
+  bus: 3
+  clips:
+  - {fileID: 8300000, guid: da840c4e75194ae3804928de3009c784, type: 3}
+  - {fileID: 8300000, guid: 13c01ecf7228455d84855d00f367c21f, type: 3}
+  - {fileID: 8300000, guid: 7c6aa57844bd4220a24b8fa2bcaf5f6b, type: 3}
+  - {fileID: 8300000, guid: fe06471b2209469e8a104e294ebf298b, type: 3}
+  selectionMode: 0
+  loop: 0
+  volumeRange: {x: 0.58, y: 0.72}
+  pitchRange: {x: 1, y: 1.06}
+  priority: 128
+  maxConcurrentInstances: 2
+  cooldownSeconds: 0.06
+  concurrencyGroup: player.movement.footsteps
+  concurrencyMode: 1
+  fadeInSeconds: 0
+  ignoreListenerPause: 0
+  spatialBlend: 0.1
+  rolloffMode: 0
+  minDistance: 2
+  maxDistance: 18

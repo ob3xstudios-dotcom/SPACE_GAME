@@ -65,6 +65,9 @@ namespace Game.Player
             }
         }
 
+        public bool IsDeployed => deployed;
+        public bool IsLiftActive => liftActive;
+
         private void Awake()
         {
             body = GetComponent<Rigidbody2D>();
