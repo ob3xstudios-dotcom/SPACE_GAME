@@ -232,6 +232,7 @@ namespace Game.Enemies.TankCharger
             velocity.space = ParticleSystemSimulationSpace.Local;
             velocity.x = new ParticleSystem.MinMaxCurve(-0.45f, -0.18f);
             velocity.y = new ParticleSystem.MinMaxCurve(0.45f, 0.9f);
+            velocity.z = new ParticleSystem.MinMaxCurve(0f, 0f);
 
             ParticleSystem.SizeOverLifetimeModule size = smoke.sizeOverLifetime;
             size.enabled = true;
