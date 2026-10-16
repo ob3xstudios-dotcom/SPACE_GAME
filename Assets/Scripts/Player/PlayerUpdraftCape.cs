@@ -12,11 +12,16 @@ namespace Game.Player
     {
         private const float StrengthComparisonEpsilon = 0.0001f;
         private const float EndContainmentSafetyMargin = 0.02f;
-
         [Header("Provisional Visual")]
         [SerializeField] private bool createPlaceholderVisual = true;
         [SerializeField] private Color stowedColor = new Color(0.15f, 0.75f, 0.95f, 0.9f);
         [SerializeField] private Color deployedColor = new Color(0.35f, 0.95f, 1f, 0.95f);
+
+        [Header("Aerodynamic Resistance")]
+        [Tooltip("Vertical air resistance while rising, in inverse seconds. Higher values reduce jump height more when the cape is opened early.")]
+        [SerializeField, Range(0f, 5f)] private float ascentAirResistance = 1f;
+        [Tooltip("Vertical air resistance while falling, in inverse seconds. Higher values produce a lower effective terminal fall speed.")]
+        [SerializeField, Range(0f, 12f)] private float descentAirResistance = 6f;
 
         [Header("Diagnostics")]
 #if UNITY_EDITOR
@@ -138,6 +143,7 @@ namespace Game.Player
                 SetMotionBlockReason("no-zone");
                 StopLift("no-zone", true);
                 SetActiveZone(null);
+                ApplyAerodynamicResistance();
                 return;
             }
 
@@ -359,6 +365,35 @@ namespace Game.Player
             float currentFlowSpeed = Vector2.Dot(currentVelocity, direction);
             body.velocity = currentVelocity +
                 direction * (targetFlowSpeed - currentFlowSpeed);
+        }
+
+        private void ApplyAerodynamicResistance()
+        {
+            if (!deployed || controller == null ||
+                !controller.CanUseUpdraftCapeMotion)
+            {
+                return;
+            }
+
+            float verticalSpeed = body.velocity.y;
+            if (verticalSpeed > 0.01f &&
+                controller.HasProtectedUpwardAirCurrentMomentum)
+            {
+                return;
+            }
+
+            float resistance = verticalSpeed > 0.01f
+                ? ascentAirResistance
+                : verticalSpeed < -0.01f
+                    ? descentAirResistance
+                    : 0f;
+            if (resistance <= 0f)
+                return;
+
+            float dragAcceleration = -verticalSpeed * resistance;
+            body.AddForce(
+                Vector2.up * (dragAcceleration * body.mass),
+                ForceMode2D.Force);
         }
 
         private void ResolveMainCollider()

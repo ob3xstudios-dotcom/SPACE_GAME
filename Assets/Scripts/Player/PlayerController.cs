@@ -711,6 +711,9 @@ namespace Game.Player
             upwardAirCurrentMomentumProtected = true;
         }
 
+        internal bool HasProtectedUpwardAirCurrentMomentum =>
+            upwardAirCurrentMomentumProtected;
+
         public void FaceDirection(int dir)
         {
             if (IsSliding || IsDiving) return;

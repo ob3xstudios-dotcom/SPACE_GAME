@@ -1,3 +1,4 @@
+using Cinemachine;
 using Game.Audio;
 using Game.World;
 using UnityEngine;
@@ -7,6 +8,7 @@ namespace Game.Player
     [DisallowMultipleComponent]
     [RequireComponent(typeof(PlayerController))]
     [RequireComponent(typeof(Rigidbody2D))]
+    [RequireComponent(typeof(CinemachineImpulseSource))]
     public class PlayerParkourFeedback : MonoBehaviour
     {
         private const string FootstepWalkEventId = "player.movement.footstep.walk";
@@ -41,6 +43,8 @@ namespace Game.Player
         private const string ArmoredImpactEventId = "player.combat.impact.armored";
         private const string ParrySuccessEventId = "player.combat.parry.success";
         private const string DamageReceivedEventId = "player.combat.damage.received";
+        private const float MinimumLandingContactNormalY = 0.55f;
+        private const float LandingImpactSampleLifetime = 0.05f;
 
         [Header("References")]
         [SerializeField] private PlayerController controller;
@@ -71,6 +75,13 @@ namespace Game.Player
         [SerializeField, Min(0f)] private float minOverheadRailLoopSpeed = 0.35f;
         [SerializeField, Min(0f)] private float minCapeLoopSpeed = 1.25f;
 
+        [Header("Combat Camera Impulse")]
+        [SerializeField] private CinemachineImpulseSource combatImpulseSource;
+        [SerializeField, Min(0f)] private float attackImpactImpulse = 0.12f;
+        [SerializeField, Min(0f)] private float damageReceivedImpulse = 0.2f;
+        [SerializeField, Min(0.01f)] private float combatImpulseDuration = 0.14f;
+        [SerializeField, Min(0f)] private float combatImpulseCooldown = 0.075f;
+
         [Header("Wall Slide Visual")]
         [SerializeField] private bool enableWallSlideLean = true;
         [SerializeField, Range(0f, 12f)] private float wallSlideLeanDegrees = 5f;
@@ -92,6 +103,8 @@ namespace Game.Player
         private bool movementAudioSuspended;
         private bool movementAudioBlocked;
         private float lastAirDownSpeed;
+        private float collisionLandingDownSpeed;
+        private float collisionLandingFixedTime = float.NegativeInfinity;
         private float footstepDistance;
         private float lastFootstepTime = float.NegativeInfinity;
         private Vector2 previousFootstepPosition;
@@ -109,12 +122,17 @@ namespace Game.Player
         private AudioPlaybackHandle swingLoopHandle;
         private AudioPlaybackHandle overheadRailLoopHandle;
         private AudioPlaybackHandle capeLoopHandle;
+        private float lastCombatImpulseTime = float.NegativeInfinity;
+        private float currentCombatImpulseStrength;
+        private Vector2 currentCombatImpulseDirection = Vector2.up;
 
         private void Awake()
         {
             if (controller == null) controller = GetComponent<PlayerController>();
             if (rb == null) rb = GetComponent<Rigidbody2D>();
             if (capsule == null) capsule = GetComponent<CapsuleCollider2D>();
+            if (combatImpulseSource == null) combatImpulseSource = GetComponent<CinemachineImpulseSource>();
+            ConfigureCombatImpulseSource();
             playerParry = GetComponent<PlayerParry>();
             playerHealth = GetComponent<PlayerHealth>();
             updraftCape = GetComponent<PlayerUpdraftCape>();
@@ -165,6 +183,31 @@ namespace Game.Player
             }
         }
 
+        private void OnValidate()
+        {
+            combatImpulseDuration = Mathf.Max(0.01f, combatImpulseDuration);
+            combatImpulseCooldown = Mathf.Max(0f, combatImpulseCooldown);
+            attackImpactImpulse = Mathf.Max(0f, attackImpactImpulse);
+            damageReceivedImpulse = Mathf.Max(0f, damageReceivedImpulse);
+
+            if (combatImpulseSource == null)
+                combatImpulseSource = GetComponent<CinemachineImpulseSource>();
+
+            ConfigureCombatImpulseSource();
+        }
+
+        private void ConfigureCombatImpulseSource()
+        {
+            if (combatImpulseSource == null)
+                return;
+
+            if (combatImpulseSource.m_ImpulseDefinition == null)
+                combatImpulseSource.m_ImpulseDefinition = new CinemachineImpulseDefinition();
+
+            combatImpulseSource.m_ImpulseDefinition.m_ImpulseDuration =
+                Mathf.Max(0.01f, combatImpulseDuration);
+        }
+
         private void OnEnable()
         {
             if (controller != null)
@@ -187,6 +230,8 @@ namespace Game.Player
             movementAudioBlocked = false;
             movementAudioSuspended = false;
             movementAudioInitialized = false;
+            ResetLandingImpactSample();
+            ResetCombatImpulseGate();
             ResetFootstepTracking();
         }
 
@@ -210,6 +255,8 @@ namespace Game.Player
             }
 
             StopMovementLoops();
+            ResetLandingImpactSample();
+            ResetCombatImpulseGate();
             ResetFootstepTracking();
 
             RestoreVisuals();
@@ -311,7 +358,13 @@ namespace Game.Player
             }
 
             if (!grounded)
-                lastAirDownSpeed = Mathf.Max(lastAirDownSpeed, -rb.velocity.y);
+            {
+                float currentDownSpeed = -rb.velocity.y;
+                if (currentDownSpeed > 0.01f)
+                    lastAirDownSpeed = currentDownSpeed;
+                else if (rb.velocity.y > 0.01f)
+                    lastAirDownSpeed = 0f;
+            }
 
             if (wallSliding && !wasWallSliding)
                 OnWallSlideStarted();
@@ -320,7 +373,7 @@ namespace Game.Player
 
             bool justLanded = !wasGrounded && grounded;
             if (justLanded)
-                OnLanded(lastAirDownSpeed);
+                OnLanded(ConsumeLandingDownSpeed());
 
             if (dashing && !wasDashing)
                 AudioService.PlayAt(DashEventId, transform.position);
@@ -355,6 +408,60 @@ namespace Game.Player
             wasCapeDeployed = capeDeployed;
             previousSlideDiveState = slideDiveState;
             previousSwingMode = swingMode;
+        }
+
+        private void OnCollisionEnter2D(Collision2D collision)
+        {
+            if (movementAudioBlocked || collision == null ||
+                collision.collider == null || collision.collider.isTrigger)
+            {
+                return;
+            }
+
+            bool hasLandingContact = false;
+            for (int i = 0; i < collision.contactCount; i++)
+            {
+                if (collision.GetContact(i).normal.y >= MinimumLandingContactNormalY)
+                {
+                    hasLandingContact = true;
+                    break;
+                }
+            }
+
+            if (!hasLandingContact)
+                return;
+
+            float impactDownSpeed = Mathf.Abs(collision.relativeVelocity.y);
+            if (impactDownSpeed <= 0.01f)
+                return;
+
+            bool samePhysicsStep =
+                Mathf.Abs(Time.fixedTime - collisionLandingFixedTime) <= 0.0001f;
+            collisionLandingDownSpeed = samePhysicsStep
+                ? Mathf.Max(collisionLandingDownSpeed, impactDownSpeed)
+                : impactDownSpeed;
+            collisionLandingFixedTime = Time.fixedTime;
+        }
+
+        private float ConsumeLandingDownSpeed()
+        {
+            float sampleAge = Time.fixedTime - collisionLandingFixedTime;
+            bool hasRecentCollisionSample =
+                sampleAge >= -0.0001f &&
+                sampleAge <= Mathf.Max(
+                    LandingImpactSampleLifetime,
+                    Time.fixedDeltaTime * 2.5f);
+            float downSpeed = hasRecentCollisionSample
+                ? collisionLandingDownSpeed
+                : lastAirDownSpeed;
+            ResetLandingImpactSample();
+            return downSpeed;
+        }
+
+        private void ResetLandingImpactSample()
+        {
+            collisionLandingDownSpeed = 0f;
+            collisionLandingFixedTime = float.NegativeInfinity;
         }
 
         private void UpdateSlideDiveAudio(
@@ -518,6 +625,9 @@ namespace Game.Player
             }
 
             AudioService.PlayAt(eventId, hitPosition);
+            GenerateCombatCameraImpulse(
+                attackImpactImpulse,
+                hitPosition - (Vector2)transform.position);
         }
 
         private void OnParrySucceeded(Game.Enemies.EnemyBase enemy)
@@ -529,7 +639,56 @@ namespace Game.Player
         private void OnPlayerDamaged(int damage)
         {
             if (damage > 0)
+            {
                 AudioService.PlayAt(DamageReceivedEventId, transform.position);
+                GenerateCombatCameraImpulse(damageReceivedImpulse, Vector2.zero);
+            }
+        }
+
+        private void GenerateCombatCameraImpulse(float targetStrength, Vector2 directionHint)
+        {
+            if (combatImpulseSource == null || targetStrength <= 0f)
+                return;
+
+            float now = Time.unscaledTime;
+            bool joinsCurrentImpulse =
+                now - lastCombatImpulseTime < combatImpulseCooldown;
+            float strengthToEmit = targetStrength;
+
+            if (joinsCurrentImpulse)
+            {
+                if (targetStrength <= currentCombatImpulseStrength)
+                    return;
+
+                strengthToEmit = targetStrength - currentCombatImpulseStrength;
+                currentCombatImpulseStrength = targetStrength;
+            }
+            else
+            {
+                currentCombatImpulseDirection = directionHint.sqrMagnitude > 0.0001f
+                    ? directionHint.normalized
+                    : Random.insideUnitCircle.normalized;
+
+                if (currentCombatImpulseDirection.sqrMagnitude < 0.0001f)
+                    currentCombatImpulseDirection = Vector2.up;
+
+                currentCombatImpulseStrength = targetStrength;
+            }
+
+            lastCombatImpulseTime = now;
+            combatImpulseSource.GenerateImpulseAtPositionWithVelocity(
+                transform.position,
+                new Vector3(
+                    currentCombatImpulseDirection.x,
+                    currentCombatImpulseDirection.y,
+                    0f) * strengthToEmit);
+        }
+
+        private void ResetCombatImpulseGate()
+        {
+            lastCombatImpulseTime = float.NegativeInfinity;
+            currentCombatImpulseStrength = 0f;
+            currentCombatImpulseDirection = Vector2.up;
         }
 
         private void OnPlayerDied()
@@ -545,6 +704,7 @@ namespace Game.Player
             movementAudioSuspended = false;
             movementAudioInitialized = false;
             lastAirDownSpeed = 0f;
+            ResetLandingImpactSample();
             StopMovementLoops();
             ResetFootstepTracking();
         }
