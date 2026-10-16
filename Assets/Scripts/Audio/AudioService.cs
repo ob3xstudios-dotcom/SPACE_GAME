@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using Game.Map;
 using UnityEngine;
 using UnityEngine.Audio;
 
@@ -12,6 +13,8 @@ namespace Game.Audio
         private const int DefaultInitialPoolSize = 12;
         private const int DefaultMaximumVoiceCount = 24;
         private const float MinimumDecibels = -80f;
+        private const float AcousticTransitionSeconds = 0.12f;
+        private const float AcousticSilenceThreshold = 0.001f;
 
         private static AudioService instance;
         private static bool isQuitting;
@@ -61,7 +64,7 @@ namespace Game.Audio
         {
             AudioService service = Instance;
             return service != null
-                ? service.PlayInternal(definition, Vector3.zero, null, false, -1f)
+                ? service.PlayInternal(definition, Vector3.zero, null, false, -1f, false)
                 : default;
         }
 
@@ -69,7 +72,7 @@ namespace Game.Audio
         {
             AudioService service = Instance;
             return service != null && service.TryResolve(eventId, out AudioEventDefinition definition)
-                ? service.PlayInternal(definition, Vector3.zero, null, false, -1f)
+                ? service.PlayInternal(definition, Vector3.zero, null, false, -1f, false)
                 : default;
         }
 
@@ -79,7 +82,7 @@ namespace Game.Audio
         {
             AudioService service = Instance;
             return service != null
-                ? service.PlayInternal(definition, position, null, false, -1f)
+                ? service.PlayInternal(definition, position, null, false, -1f, false)
                 : default;
         }
 
@@ -87,7 +90,27 @@ namespace Game.Audio
         {
             AudioService service = Instance;
             return service != null && service.TryResolve(eventId, out AudioEventDefinition definition)
-                ? service.PlayInternal(definition, position, null, false, -1f)
+                ? service.PlayInternal(definition, position, null, false, -1f, false)
+                : default;
+        }
+
+        public static AudioPlaybackHandle PlayAtAcoustic(
+            AudioEventDefinition definition,
+            Vector3 position)
+        {
+            AudioService service = Instance;
+            return service != null
+                ? service.PlayInternal(definition, position, null, false, -1f, true)
+                : default;
+        }
+
+        public static AudioPlaybackHandle PlayAtAcoustic(
+            string eventId,
+            Vector3 position)
+        {
+            AudioService service = Instance;
+            return service != null && service.TryResolve(eventId, out AudioEventDefinition definition)
+                ? service.PlayInternal(definition, position, null, false, -1f, true)
                 : default;
         }
 
@@ -98,7 +121,7 @@ namespace Game.Audio
             AudioService service = Instance;
             Vector3 position = target != null ? target.position : Vector3.zero;
             return service != null
-                ? service.PlayInternal(definition, position, target, false, -1f)
+                ? service.PlayInternal(definition, position, target, false, -1f, false)
                 : default;
         }
 
@@ -110,7 +133,19 @@ namespace Game.Audio
             AudioService service = Instance;
             Vector3 position = target != null ? target.position : Vector3.zero;
             return service != null
-                ? service.PlayInternal(definition, position, target, true, fadeInSeconds)
+                ? service.PlayInternal(definition, position, target, true, fadeInSeconds, false)
+                : default;
+        }
+
+        public static AudioPlaybackHandle StartAcousticLoop(
+            AudioEventDefinition definition,
+            Transform target = null,
+            float fadeInSeconds = -1f)
+        {
+            AudioService service = Instance;
+            Vector3 position = target != null ? target.position : Vector3.zero;
+            return service != null
+                ? service.PlayInternal(definition, position, target, true, fadeInSeconds, true)
                 : default;
         }
 
@@ -121,7 +156,7 @@ namespace Game.Audio
         {
             AudioService service = Instance;
             return service != null
-                ? service.PlayInternal(definition, position, null, true, fadeInSeconds)
+                ? service.PlayInternal(definition, position, null, true, fadeInSeconds, false)
                 : default;
         }
 
@@ -154,7 +189,9 @@ namespace Game.Audio
                 return false;
             }
 
-            voice.Source.transform.position = position;
+            voice.Position = position;
+            if (voice.Source != null)
+                voice.Source.transform.position = position;
             return true;
         }
 
@@ -245,9 +282,11 @@ namespace Game.Audio
                 {
                     if (voice.FollowTarget != null)
                     {
-                        voice.Source.transform.position = voice.FollowTarget.position;
+                        voice.Position = voice.FollowTarget.position;
+                        if (voice.Source != null)
+                            voice.Source.transform.position = voice.Position;
                     }
-                    else if (voice.Source.loop)
+                    else if (voice.Source != null && voice.Source.loop)
                     {
                         voice.WasFollowing = false;
                         StopVoice(voice, 0.1f);
@@ -260,6 +299,25 @@ namespace Game.Audio
 
                 if (!voicesByHandle.ContainsKey(voice.HandleId))
                     continue;
+
+                if (voice.UseAcousticRooms)
+                {
+                    float targetGain = AcousticRoomSystem2D.GetTransmission(
+                        voice.Position,
+                        ref voice.AcousticRoom);
+                    voice.AcousticGain = Mathf.MoveTowards(
+                        voice.AcousticGain,
+                        targetGain,
+                        unscaledDeltaTime / AcousticTransitionSeconds);
+                    ApplyVoiceVolume(voice);
+
+                    if (targetGain <= AcousticSilenceThreshold &&
+                        voice.AcousticGain <= AcousticSilenceThreshold)
+                    {
+                        ReleaseVoice(voice);
+                        continue;
+                    }
+                }
 
                 if (voice.FadeSpeed > 0f)
                 {
@@ -280,8 +338,12 @@ namespace Game.Audio
                         voice.FadeSpeed = 0f;
                 }
 
-                if (!voice.Source.isPlaying && !voice.FadingOut)
+                if (voice.Source != null &&
+                    !voice.Source.isPlaying &&
+                    !voice.FadingOut)
+                {
                     ReleaseVoice(voice);
+                }
             }
         }
 
@@ -296,7 +358,10 @@ namespace Game.Audio
                 return;
 
             for (int i = activeVoices.Count - 1; i >= 0; i--)
-                activeVoices[i].Source.Stop();
+            {
+                if (activeVoices[i].Source != null)
+                    activeVoices[i].Source.Stop();
+            }
 
             activeVoices.Clear();
             voicesByHandle.Clear();
@@ -309,9 +374,17 @@ namespace Game.Audio
             Vector3 position,
             Transform followTarget,
             bool forceLoop,
-            float requestedFadeInSeconds)
+            float requestedFadeInSeconds,
+            bool useAcousticRooms)
         {
             if (definition == null)
+                return default;
+
+            MapRoomQuery2D sourceRoom = default;
+            float acousticGain = useAcousticRooms
+                ? AcousticRoomSystem2D.GetTransmission(position, ref sourceRoom)
+                : 1f;
+            if (acousticGain <= AcousticSilenceThreshold)
                 return default;
 
             EventRuntimeState state = GetEventState(definition);
@@ -359,10 +432,14 @@ namespace Game.Audio
                 StartedAt = now,
                 FollowTarget = followTarget,
                 WasFollowing = followTarget != null,
+                Position = position,
                 BaseVolume = baseVolume,
                 VolumeMultiplier = 1f,
                 Fade = fadeInSeconds > 0f ? 0f : 1f,
-                FadeSpeed = fadeInSeconds > 0f ? 1f / fadeInSeconds : 0f
+                FadeSpeed = fadeInSeconds > 0f ? 1f / fadeInSeconds : 0f,
+                UseAcousticRooms = useAcousticRooms,
+                AcousticRoom = sourceRoom,
+                AcousticGain = acousticGain
             };
 
             ApplyVoiceVolume(voice);
@@ -596,7 +673,10 @@ namespace Game.Audio
             if (voice.Source != null)
             {
                 voice.Source.volume = Mathf.Clamp01(
-                    voice.BaseVolume * voice.VolumeMultiplier * voice.Fade);
+                    voice.BaseVolume *
+                    voice.VolumeMultiplier *
+                    voice.Fade *
+                    voice.AcousticGain);
             }
         }
 
@@ -693,11 +773,15 @@ namespace Game.Audio
             public double StartedAt;
             public Transform FollowTarget;
             public bool WasFollowing;
+            public Vector3 Position;
             public float BaseVolume;
             public float VolumeMultiplier;
             public float Fade;
             public float FadeSpeed;
             public bool FadingOut;
+            public bool UseAcousticRooms;
+            public MapRoomQuery2D AcousticRoom;
+            public float AcousticGain = 1f;
         }
 
         private sealed class EventRuntimeState

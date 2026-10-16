@@ -36,6 +36,12 @@ namespace Game.Map
             WarnIfCellIdIsMissing();
         }
 
+        private void OnEnable()
+        {
+            if (Application.isPlaying)
+                MapRoomLocator2D.Register(this);
+        }
+
         private void OnTriggerEnter2D(Collider2D other)
         {
             PlayerController player = other.GetComponentInParent<PlayerController>();
@@ -95,6 +101,9 @@ namespace Game.Map
 
         private void OnDisable()
         {
+            if (Application.isPlaying)
+                MapRoomLocator2D.Unregister(this);
+
             playerContactCounts.Clear();
         }
 
