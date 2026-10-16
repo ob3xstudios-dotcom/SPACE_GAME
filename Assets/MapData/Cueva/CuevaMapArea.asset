@@ -1,0 +1,34 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 11cae31802294521b96d004936d4baa6, type: 3}
+  m_Name: CuevaMapArea
+  m_EditorClassIdentifier:
+  areaId: cueva
+  displayName: CUEVA
+  cells:
+  - {fileID: 11400000, guid: c6b1576cec93bd9ff89893857e451a30, type: 2}
+  - {fileID: 11400000, guid: 295cca189bf59ff733ee8933ae6268c1, type: 2}
+  - {fileID: 11400000, guid: 3dc4b04829af9bc52e6779098766ef85, type: 2}
+  - {fileID: 11400000, guid: b9bc501fe30b44b8c7bd90102aa6c525, type: 2}
+  - {fileID: 11400000, guid: 838052c16777fcb853636e2c6aa6684e, type: 2}
+  - {fileID: 11400000, guid: fc75d3eee7e4f5bb66f5a3587e9d4774, type: 2}
+  - {fileID: 11400000, guid: 4afceae3d9039ac2742cd551a7f343cf, type: 2}
+  - {fileID: 11400000, guid: 495270da57c4ea95a628dd95b807232a, type: 2}
+  - {fileID: 11400000, guid: 4427bf08ea26d1ed0f8179af51edd7c0, type: 2}
+  - {fileID: 11400000, guid: c3a7614c384e5eb26cfff174ba3c5997, type: 2}
+  - {fileID: 11400000, guid: 653cb6d88d12f1b97b08f4aec17942d4, type: 2}
+  - {fileID: 11400000, guid: 6d0d4a3f23cdcb6147d95f18242d870d, type: 2}
+  - {fileID: 11400000, guid: 926a4000c0fe5ecd3ab517de13675849, type: 2}
+  - {fileID: 11400000, guid: c67c992769914bc43d0bb18c46837386, type: 2}
+  - {fileID: 11400000, guid: 70576998ef6ec0f9c8083b3426677cb2, type: 2}
+  - {fileID: 11400000, guid: 8915895e6e0c86972c9c475b45633593, type: 2}
+  - {fileID: 11400000, guid: 2962a051dd0229bd12707ca165a5d568, type: 2}
