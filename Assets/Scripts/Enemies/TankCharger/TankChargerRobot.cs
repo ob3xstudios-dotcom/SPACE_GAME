@@ -1,5 +1,6 @@
 using Game.Enemies.Combat;
 using Game.Combat;
+using Game.Audio;
 using Game.World;
 using UnityEngine;
 
@@ -30,6 +31,15 @@ namespace Game.Enemies.TankCharger
     {
         private const float ChargeTrackingRayEpsilon = 0.02f;
         private const float ChargeTrackingBehindTolerance = 0.05f;
+        private const string MovementLoopEventId = "enemy.tank.movement.loop";
+        private const string AlertEventId = "enemy.tank.alert";
+        private const string WindupLoopEventId = "enemy.tank.charge.windup";
+        private const string ChargeStartEventId = "enemy.tank.charge.start";
+        private const string ChargeLoopEventId = "enemy.tank.charge.loop";
+        private const string ChargeWorldImpactEventId = "enemy.tank.charge.impact.world";
+        private const string ChargePlayerImpactEventId = "enemy.tank.charge.impact.player";
+        private const string DamageEventId = "enemy.tank.damage";
+        private const string DeathEventId = "enemy.tank.death";
 
         [Header("References")]
         [SerializeField] private EnemySensors sensors;
@@ -123,6 +133,9 @@ namespace Game.Enemies.TankCharger
         private int bellyUpSeparationDirection;
         private float bellyUpSeparationTargetX;
         private float bellyUpSeparationTimer;
+        private AudioPlaybackHandle movementLoopHandle;
+        private AudioPlaybackHandle windupLoopHandle;
+        private AudioPlaybackHandle chargeLoopHandle;
 
         public TankChargerState CurrentState { get; private set; } = TankChargerState.Patrolling;
         public int FacingDirection => facingDirection;
@@ -159,7 +172,10 @@ namespace Game.Enemies.TankCharger
             if (health == null)
                 health = GetComponent<Health>();
             if (health != null)
+            {
                 health.OnDamaged += HandleDamaged;
+                health.OnDied += HandleDied;
+            }
         }
 
         private void Start()
@@ -198,6 +214,7 @@ namespace Game.Enemies.TankCharger
                 chargeHitbox.HitCountThisActivation > 0)
             {
                 hitLoggedThisCharge = true;
+                AudioService.PlayAtAcoustic(ChargePlayerImpactEventId, transform.position);
                 LogPlayerHit();
                 BeginPlayerImpactRebound();
             }
@@ -279,6 +296,8 @@ namespace Game.Enemies.TankCharger
                 standableSurface.SetMovementDelta(
                     Vector2.right * body.velocity.x * Time.fixedDeltaTime);
             }
+
+            SyncMovementAudio();
         }
 
         private void UpdatePatrol()
@@ -323,6 +342,7 @@ namespace Game.Enemies.TankCharger
             windupTargetX = player != null ? targetX : body.position.x + facingDirection;
             SetFacing(DirectionTo(windupTargetX));
             TransitionTo(TankChargerState.Windup);
+            AudioService.PlayAtAcoustic(AlertEventId, transform.position);
             LogDetected(source, player);
             LogWindup();
         }
@@ -443,6 +463,7 @@ namespace Game.Enemies.TankCharger
             }
 
             TransitionTo(TankChargerState.Charging);
+            AudioService.PlayAtAcoustic(ChargeStartEventId, transform.position);
             LogChargeStart();
         }
 
@@ -583,6 +604,8 @@ namespace Game.Enemies.TankCharger
             currentChargeSpeed = 0f;
             body.velocity = new Vector2(0f, body.velocity.y);
             cooldownTimer = chargeCooldown;
+            if (reason == "Wall")
+                AudioService.PlayAtAcoustic(ChargeWorldImpactEventId, transform.position);
             TransitionTo(TankChargerState.Recovery);
             LogChargeEnd(reason);
         }
@@ -749,6 +772,8 @@ namespace Game.Enemies.TankCharger
 
             TankChargerState interruptedState = CurrentState;
             LogHit(damagedHealth.CurrentHP, interruptedState);
+            if (damagedHealth.CurrentHP > 0)
+                AudioService.PlayAtAcoustic(DamageEventId, transform.position);
 
             if (chargeHitbox != null)
                 chargeHitbox.DisableHitbox();
@@ -760,6 +785,12 @@ namespace Game.Enemies.TankCharger
                 LogBellyUpEnd(damagedHealth.CurrentHP <= 0 ? "Death" : "Hit");
             TransitionTo(TankChargerState.Stunned);
             body.velocity = GetHitKnockbackVelocity(sourcePosition);
+        }
+
+        private void HandleDied(Health deadHealth)
+        {
+            StopAllEnemyLoops();
+            AudioService.PlayAtAcoustic(DeathEventId, transform.position);
         }
 
         private Vector2 GetHitKnockbackVelocity(Vector2 sourcePosition)
@@ -827,11 +858,13 @@ namespace Game.Enemies.TankCharger
 
         private void TransitionTo(TankChargerState nextState)
         {
+            TankChargerState previousState = CurrentState;
             if (nextState != TankChargerState.Recovery)
                 playerImpactReboundActive = false;
 
             CurrentState = nextState;
             stateTimer = 0f;
+            HandleAudioTransition(previousState, nextState);
         }
 
         private void OnCollisionEnter2D(Collision2D collision)
@@ -857,12 +890,85 @@ namespace Game.Enemies.TankCharger
         private void OnDisable()
         {
             if (health != null)
+            {
                 health.OnDamaged -= HandleDamaged;
+                health.OnDied -= HandleDied;
+            }
             if (chargeHitbox != null)
                 chargeHitbox.DisableHitbox();
             playerImpactReboundActive = false;
+            StopAllEnemyLoops();
             if (standableSurface != null)
                 standableSurface.SetMovementDelta(Vector2.zero);
+        }
+
+        private void HandleAudioTransition(
+            TankChargerState previousState,
+            TankChargerState nextState)
+        {
+            if (nextState != TankChargerState.Patrolling)
+                StopLoop(ref movementLoopHandle, 0.08f);
+            if (nextState != TankChargerState.Windup)
+                StopLoop(ref windupLoopHandle, 0.06f);
+            if (nextState != TankChargerState.Charging)
+                StopLoop(ref chargeLoopHandle, 0.08f);
+
+            if (previousState != nextState && nextState == TankChargerState.Windup)
+                EnsureLoop(ref windupLoopHandle, WindupLoopEventId);
+        }
+
+        private void SyncMovementAudio()
+        {
+            bool patrolMoving =
+                CurrentState == TankChargerState.Patrolling &&
+                body != null &&
+                Mathf.Abs(body.velocity.x) > 0.1f;
+            bool chargeMoving =
+                CurrentState == TankChargerState.Charging &&
+                body != null &&
+                Mathf.Abs(body.velocity.x) > 0.1f;
+
+            SyncLoop(ref movementLoopHandle, MovementLoopEventId, patrolMoving);
+            SyncLoop(
+                ref windupLoopHandle,
+                WindupLoopEventId,
+                CurrentState == TankChargerState.Windup);
+            SyncLoop(ref chargeLoopHandle, ChargeLoopEventId, chargeMoving);
+        }
+
+        private void SyncLoop(
+            ref AudioPlaybackHandle handle,
+            string eventId,
+            bool shouldPlay)
+        {
+            if (shouldPlay)
+                EnsureLoop(ref handle, eventId);
+            else
+                StopLoop(ref handle, 0.08f);
+        }
+
+        private void EnsureLoop(ref AudioPlaybackHandle handle, string eventId)
+        {
+            if (handle.IsValid)
+                return;
+
+            AudioService service = AudioService.Instance;
+            AudioEventCatalog catalog = service != null ? service.Catalog : null;
+            if (catalog != null && catalog.TryGet(eventId, out AudioEventDefinition definition))
+                handle = AudioService.StartAcousticLoop(definition, transform);
+        }
+
+        private static void StopLoop(ref AudioPlaybackHandle handle, float fadeOutSeconds)
+        {
+            AudioService.Stop(handle, fadeOutSeconds);
+            handle = default;
+        }
+
+        private void StopAllEnemyLoops()
+        {
+            StopLoop(ref movementLoopHandle, 0.05f);
+            StopLoop(ref windupLoopHandle, 0.05f);
+            StopLoop(ref chargeLoopHandle, 0.05f);
         }
 
         private void OnValidate()

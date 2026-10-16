@@ -1,4 +1,5 @@
 using UnityEngine;
+using Game.Audio;
 using Game.Combat;
 using Game.World;
 
@@ -37,6 +38,15 @@ namespace Game.Enemies.AerialSentry
     [RequireComponent(typeof(Health))]
     public sealed class AerialSentryRobot : MonoBehaviour, IPlayerAttackReceiver
     {
+        private const string HoverLoopEventId = "enemy.aerial.hover.loop";
+        private const string PatrolTurnEventId = "enemy.aerial.patrol.turn";
+        private const string DetectEventId = "enemy.aerial.detect";
+        private const string AlertEventId = "enemy.aerial.alert";
+        private const string ChargeLoopEventId = "enemy.aerial.attack.charge";
+        private const string FireEventId = "enemy.aerial.attack.fire";
+        private const string DamageEventId = "enemy.aerial.damage";
+        private const string DeathEventId = "enemy.aerial.death";
+
         [Header("Patrol")]
         [SerializeField] private AerialSentryPatrolAxis axis = AerialSentryPatrolAxis.Horizontal;
         [SerializeField, Min(0f)] private float patrolDistance = 4f;
@@ -122,6 +132,8 @@ namespace Game.Enemies.AerialSentry
         private float downHitSeparationTimer;
         private readonly RaycastHit2D[] groundClearanceHits = new RaycastHit2D[8];
         private readonly RaycastHit2D[] separationHits = new RaycastHit2D[8];
+        private AudioPlaybackHandle hoverLoopHandle;
+        private AudioPlaybackHandle chargeLoopHandle;
 
         public AerialSentryState CurrentState { get; private set; } = AerialSentryState.Patrolling;
         public float ChargeProgress => CurrentState != AerialSentryState.Charging
@@ -159,11 +171,20 @@ namespace Game.Enemies.AerialSentry
             if (health == null)
                 health = GetComponent<Health>();
             if (health != null)
+            {
                 health.OnDamaged += HandleDamaged;
+                health.OnDied += HandleDied;
+            }
+
+            EnsureLoop(ref hoverLoopHandle, HoverLoopEventId);
         }
 
         private void Update()
         {
+            EnsureLoop(ref hoverLoopHandle, HoverLoopEventId);
+            if (CurrentState == AerialSentryState.Charging)
+                EnsureLoop(ref chargeLoopHandle, ChargeLoopEventId);
+
             if (attackCooldownTimer > 0f)
                 attackCooldownTimer = Mathf.Max(0f, attackCooldownTimer - Time.deltaTime);
 
@@ -347,6 +368,7 @@ namespace Game.Enemies.AerialSentry
                 return;
 
             movingToPositiveEnd = !movingToPositiveEnd;
+            AudioService.PlayAtAcoustic(PatrolTurnEventId, transform.position);
             if (waitAtEnds)
                 endWaitTimer = endWaitDuration;
         }
@@ -822,6 +844,8 @@ namespace Game.Enemies.AerialSentry
                 return;
 
             LogHit(damagedHealth.CurrentHP);
+            if (damagedHealth.CurrentHP > 0)
+                AudioService.PlayAtAcoustic(DamageEventId, transform.position);
 
             if (CurrentState != AerialSentryState.Stunned)
             {
@@ -842,6 +866,12 @@ namespace Game.Enemies.AerialSentry
             }
             pursuitVelocity = GetHitKnockbackVelocity(sourcePosition);
             hasSightThisFrame = false;
+        }
+
+        private void HandleDied(Health deadHealth)
+        {
+            StopAllEnemyLoops();
+            AudioService.PlayAtAcoustic(DeathEventId, transform.position);
         }
 
         private void BeginDownHitSeparation(PlayerAttackContext context)
@@ -979,6 +1009,7 @@ namespace Game.Enemies.AerialSentry
                 projectileWorldCollisionMask,
                 ownerCollider,
                 debugLogs);
+            AudioService.PlayAtAcoustic(FireEventId, spawnPosition);
             LogProjectileSpawned(projectile, spawnPosition, direction);
 
             CompleteAttackCycle();
@@ -995,6 +1026,12 @@ namespace Game.Enemies.AerialSentry
         private void TransitionTo(AerialSentryState nextState)
         {
             AerialSentryState previousState = CurrentState;
+            if (previousState == AerialSentryState.Charging &&
+                nextState != AerialSentryState.Charging)
+            {
+                StopLoop(ref chargeLoopHandle, 0.05f);
+            }
+
             CurrentState = nextState;
             stateTimer = 0f;
             lostSightTimer = 0f;
@@ -1007,8 +1044,15 @@ namespace Game.Enemies.AerialSentry
 
             LogStateTransition(previousState, nextState);
 
-            if (nextState == AerialSentryState.Charging)
+            if (previousState != nextState && nextState == AerialSentryState.Acquiring)
+                AudioService.PlayAtAcoustic(DetectEventId, transform.position);
+
+            if (previousState != nextState && nextState == AerialSentryState.Charging)
+            {
+                AudioService.PlayAtAcoustic(AlertEventId, transform.position);
+                EnsureLoop(ref chargeLoopHandle, ChargeLoopEventId);
                 LogChargeStart();
+            }
             else if (nextState == AerialSentryState.Searching &&
                      previousState != AerialSentryState.Searching)
                 BeginSearch();
@@ -1053,6 +1097,8 @@ namespace Game.Enemies.AerialSentry
                 case AerialSentryState.Patrolling:
                 case AerialSentryState.Acquiring:
                 case AerialSentryState.Returning:
+                    AudioService.PlayAtAcoustic(DetectEventId, transform.position);
+                    AudioService.PlayAtAcoustic(AlertEventId, transform.position);
                     TransitionTo(AerialSentryState.Searching);
                     break;
                 case AerialSentryState.Searching:
@@ -1101,9 +1147,36 @@ namespace Game.Enemies.AerialSentry
         private void OnDisable()
         {
             if (health != null)
+            {
                 health.OnDamaged -= HandleDamaged;
+                health.OnDied -= HandleDied;
+            }
+            StopAllEnemyLoops();
             if (standableSurface != null)
                 standableSurface.SetMovementDelta(Vector2.zero);
+        }
+
+        private void EnsureLoop(ref AudioPlaybackHandle handle, string eventId)
+        {
+            if (handle.IsValid)
+                return;
+
+            AudioService service = AudioService.Instance;
+            AudioEventCatalog catalog = service != null ? service.Catalog : null;
+            if (catalog != null && catalog.TryGet(eventId, out AudioEventDefinition definition))
+                handle = AudioService.StartAcousticLoop(definition, transform);
+        }
+
+        private static void StopLoop(ref AudioPlaybackHandle handle, float fadeOutSeconds)
+        {
+            AudioService.Stop(handle, fadeOutSeconds);
+            handle = default;
+        }
+
+        private void StopAllEnemyLoops()
+        {
+            StopLoop(ref hoverLoopHandle, 0.08f);
+            StopLoop(ref chargeLoopHandle, 0.05f);
         }
 
         [System.Diagnostics.Conditional("UNITY_EDITOR")]

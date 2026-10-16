@@ -20,3 +20,10 @@ These files were selected from the original archives kept in `Audio_Staging/`.
 
 Only the explicitly selected files are present under `Assets`. Five impact sounds are connected provisionally to confirmed combat events; `impactMetal_light_000.ogg` remains an unassigned evaluation candidate. Five `footstep_concrete_00x.ogg` variations from the same Impact Sounds archive are used provisionally as the default walk/run surface set. The package's original `License.txt` is also preserved in the `Movement` folder.
 
+Enemy audio adds only these explicitly selected files from the same verified archives:
+
+- Interface Sounds: `error_003.ogg` and `switch_001.ogg` for Aerial Sentry alert and patrol-turn cues.
+- Impact Sounds: `impactMetal_light_001.ogg`, `impactMetal_light_002.ogg`, `impactMetal_heavy_001.ogg`, `impactBell_heavy_001.ogg`, and `impactGeneric_light_001.ogg` for enemy damage, destruction, and projectile-world impact feedback.
+
+The original package licenses remain preserved in the `Interface` and `ImpactCandidates` folders.
+

@@ -1,0 +1,33 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 765fa5bd5c6b44d78a5131186f951d4b, type: 3}
+  m_Name: enemy_tank_charge_loop
+  m_EditorClassIdentifier:
+  eventId: enemy.tank.charge.loop
+  bus: 3
+  clips:
+  - {fileID: 8300000, guid: 7d9d4f221f294592acd2674084b82404, type: 3}
+  selectionMode: 0
+  loop: 1
+  volumeRange: {x: 0.62, y: 0.74}
+  pitchRange: {x: 0.78, y: 0.88}
+  priority: 75
+  maxConcurrentInstances: 8
+  cooldownSeconds: 0
+  concurrencyGroup: enemy.tank.charge.loop
+  concurrencyMode: 1
+  fadeInSeconds: 0.03
+  ignoreListenerPause: 0
+  spatialBlend: 1
+  rolloffMode: 0
+  minDistance: 2
+  maxDistance: 18

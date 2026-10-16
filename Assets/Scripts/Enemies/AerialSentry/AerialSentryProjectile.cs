@@ -1,4 +1,5 @@
 using Game.Player;
+using Game.Audio;
 using UnityEngine;
 
 namespace Game.Enemies.AerialSentry
@@ -8,6 +9,7 @@ namespace Game.Enemies.AerialSentry
     public sealed class AerialSentryProjectile : MonoBehaviour
     {
         private const int CastCapacity = 12;
+        private const string WorldImpactEventId = "enemy.aerial.projectile.impact.world";
 
         [Header("Collision")]
         [SerializeField] private LayerMask playerMask = 512;
@@ -192,6 +194,8 @@ namespace Game.Enemies.AerialSentry
                 return;
 
             consumed = true;
+            if (reason == "WorldHit")
+                AudioService.PlayAtAcoustic(WorldImpactEventId, body.position);
             LogDespawn(reason, hit);
             Destroy(gameObject);
         }

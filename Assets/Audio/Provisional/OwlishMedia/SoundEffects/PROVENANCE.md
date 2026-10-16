@@ -13,5 +13,6 @@ Selected files:
 - `Footsteps/step4.wav` and `Footsteps/hard-footstep2.wav` for soft and hard landings.
 - `Cloth, Rustle/blanket-movement-1.wav`, `blanket-movement-4.wav`, and `blanket-movement-6.wav` for cape movement, closing, and deployment.
 - `Impacts/alt-toasterstep1.wav` through `alt-toasterstep4.wav` as provisional metal footsteps.
+- `Scifi/robotics1.wav`, `robotics2.wav`, and `roboticsmaster.wav` for Tank Charger detection and Aerial Sentry detection/attack charge feedback.
 
 The rest of the archive remains only in `Audio_Staging/`.

@@ -8,4 +8,11 @@
 - Source archive: `sfx_100_v2.zip`
 - Source archive SHA-256: `0FC61B4494E2E893C0C015CED4877B3F689C7D84A48CB61DAECD7DDB52DB797B`
 
-Only `sfx100v2_air_01.ogg` and `sfx100v2_air_02.ogg` were selected as provisional Dolphin Dive and swing movement loops. The rest of the archive remains only in `Audio_Staging/`.
+Selected files:
+
+- `sfx100v2_air_01.ogg` and `sfx100v2_air_02.ogg` for Dolphin Dive and swing movement loops.
+- `sfx100v2_air_03.ogg` for the Aerial Sentry projectile launch.
+- `sfx100v2_loop_machine_01.ogg` through `sfx100v2_loop_machine_04.ogg` for Tank Charger locomotion, charge machinery, and Aerial Sentry hover.
+- `sfx100v2_metal_01.ogg`, `sfx100v2_metal_hit_01.ogg`, and `sfx100v2_metal_hit_02.ogg` for Tank Charger charge start and collision feedback.
+
+The rest of the archive remains only in `Audio_Staging/`.

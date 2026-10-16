@@ -1,0 +1,33 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 765fa5bd5c6b44d78a5131186f951d4b, type: 3}
+  m_Name: enemy_aerial_damage
+  m_EditorClassIdentifier:
+  eventId: enemy.aerial.damage
+  bus: 3
+  clips:
+  - {fileID: 8300000, guid: 390bd3303b3a4494a400be24830f1101, type: 3}
+  selectionMode: 0
+  loop: 0
+  volumeRange: {x: 0.55, y: 0.68}
+  pitchRange: {x: 1.1, y: 1.2}
+  priority: 65
+  maxConcurrentInstances: 8
+  cooldownSeconds: 0.03
+  concurrencyGroup: enemy.aerial.damage
+  concurrencyMode: 1
+  fadeInSeconds: 0
+  ignoreListenerPause: 0
+  spatialBlend: 1
+  rolloffMode: 0
+  minDistance: 1.5
+  maxDistance: 16
