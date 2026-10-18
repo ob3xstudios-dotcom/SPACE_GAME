@@ -289,6 +289,15 @@ namespace Game.Player
         [Tooltip("Distancia corta usada por el collider de Dive para reconocer apoyo o contacto frontal real.")]
         [SerializeField, Min(0.005f)] private float diveContactProbeDistance = 0.04f;
 
+        [Header("Landing Roll")]
+        [Tooltip("Límite máximo del impulso físico. No define la duración de una futura animación dedicada.")]
+        [SerializeField, Min(0.05f)] private float landingRollDuration = 0.35f;
+        [SerializeField, Min(0f)] private float landingRollTargetDistance = 3f;
+        [SerializeField, Min(0f)] private float landingRollReferenceSpeed = 10f;
+        [SerializeField, Min(0f)] private float landingRollGroundProximity = 2f;
+
+        private const float LandingRollDistanceCompletionTolerance = 0.02f;
+
         // --------------------
         // PARRY / MOVE LOCK
         // --------------------
@@ -301,6 +310,9 @@ namespace Game.Player
         /// <summary>Bloquea SOLO el movimiento (input X) durante seconds. Ideal para Parry.</summary>
         public void LockMovement(float seconds)
         {
+            if (isLandingRolling)
+                return;
+
             parryMoveLockTimer = Mathf.Max(parryMoveLockTimer, Mathf.Max(0f, seconds));
             rb.velocity = new Vector2(0f, rb.velocity.y);
         }
@@ -500,6 +512,18 @@ namespace Game.Player
         private float combinedDiveAirDistance;
         private bool isUsingDiveColliderRecoveryProfile;
         private string lastPostureClearanceFailureReason = "none";
+        private bool isLandingRolling;
+        private float landingRollElapsed;
+        private float landingRollDistanceTraveled;
+        private float landingRollStartPositionX;
+        private int landingRollDirection;
+        private float lastAirborneHorizontalVelocityX;
+        private bool landingRollWasBlockedBeforeLanding;
+        private bool landingRollGroundStateInitialized;
+        private bool landingRollHasBeenAirborne;
+        private bool landingRollLandingPending;
+        private bool landingRollAcceptedThisLanding;
+        private Collider2D landingRollPreparedGroundCollider;
 
         private float wallJumpLockTimer;
         private float defaultGravityScale;
@@ -625,6 +649,8 @@ namespace Game.Player
         public bool IsSliding => sprintSlideDiveState == SprintSlideDiveState.Slide;
         public bool IsDiving => sprintSlideDiveState == SprintSlideDiveState.Dive;
         public bool IsPostDiveSliding => sprintSlideDiveState == SprintSlideDiveState.ProneSlide;
+        // Integration point for a future dedicated LandingRoll animator state.
+        public bool IsLandingRolling => isLandingRolling;
         public bool IsSlippery => slipperyTimer > 0f;
         public bool IsOverheadRailHanging => isOverheadRailHanging;
         public bool IsOverheadRailStealthHanging => isOverheadRailStealthHanging;
@@ -648,6 +674,7 @@ namespace Game.Player
             !IsSliding &&
             !IsDiving &&
             !IsPostDiveSliding &&
+            !IsLandingRolling &&
             !IsMoveLockedByParry &&
             (swingJoint == null || !swingJoint.enabled) &&
             (handPivotJoint == null || !handPivotJoint.enabled) &&
@@ -716,7 +743,7 @@ namespace Game.Player
 
         public void FaceDirection(int dir)
         {
-            if (IsSliding || IsDiving) return;
+            if (IsSliding || IsDiving || IsLandingRolling) return;
             if (activeSwingMode == SwingAttachmentMode.HandPivot && IsSwinging) return;
             ApplyFacing(dir < 0 ? -1 : 1);
         }
@@ -733,6 +760,9 @@ namespace Game.Player
             {
                 if (isAttacking)
                     CancelAttack("external control");
+
+                CancelLandingRoll("external control");
+                DiscardPreparedLandingRoll();
             }
 
             externalControlLocked = locked;
@@ -800,6 +830,14 @@ namespace Game.Player
             jumpBufferTimer = 0f;
             dashTimer = 0f;
             dashCooldownTimer = 0f;
+            CancelLandingRoll("transient reset");
+            DiscardPreparedLandingRoll();
+            lastAirborneHorizontalVelocityX = 0f;
+            landingRollWasBlockedBeforeLanding = false;
+            landingRollGroundStateInitialized = false;
+            landingRollHasBeenAirborne = false;
+            landingRollLandingPending = false;
+            landingRollAcceptedThisLanding = false;
             CancelSprintSlideDiveForReset();
             ResetSprintState(true);
             wallJumpLockTimer = 0f;
@@ -951,12 +989,23 @@ namespace Game.Player
                 playerHealth = GetComponent<PlayerHealth>();
             if (playerHealth != null)
                 playerHealth.OnDamaged += HandlePlayerDamaged;
+            if (input != null)
+            {
+                input.LandingRollCrouchPerformed -= HandleLandingRollCrouchPerformed;
+                input.LandingRollCrouchPerformed += HandleLandingRollCrouchPerformed;
+            }
 
             SubscribeToProgression();
         }
 
         private void OnDisable()
         {
+            CancelLandingRoll("controller disabled");
+            DiscardPreparedLandingRoll();
+            landingRollGroundStateInitialized = false;
+            landingRollHasBeenAirborne = false;
+            landingRollLandingPending = false;
+            landingRollAcceptedThisLanding = false;
             horizontalAirCurrentInfluence = false;
             horizontalAirCurrentDirectionX = 0f;
             horizontalAirCurrentAgainstFlowControl = 1f;
@@ -971,6 +1020,8 @@ namespace Game.Player
 
             if (playerHealth != null)
                 playerHealth.OnDamaged -= HandlePlayerDamaged;
+            if (input != null)
+                input.LandingRollCrouchPerformed -= HandleLandingRollCrouchPerformed;
 
             UnsubscribeFromProgression();
 
@@ -1301,6 +1352,7 @@ namespace Game.Player
             UpdateIgnoredStandableTimer(Time.deltaTime);
 
             if (stats == null || input == null) return;
+            ValidatePreparedLandingRoll();
 
             // cooldowns
             ledgeGrabCooldownTimer -= Time.deltaTime;
@@ -1343,6 +1395,12 @@ namespace Game.Player
                 // movement and physics, but do not process gameplay state or input.
                 dashCooldownTimer -= Time.deltaTime;
                 attackCooldownTimer -= Time.deltaTime;
+                return;
+            }
+
+            if (isLandingRolling)
+            {
+                UpdateLandingRoll();
                 return;
             }
 
@@ -1426,6 +1484,9 @@ namespace Game.Player
                 ApplyFacing((int)Mathf.Sign(rawInputX));
 
             CheckGround();
+            if (TryResolvePendingLandingRoll())
+                return;
+
             if (isSustainedAirDownAttack && isGrounded)
                 CancelAttack("down attack landed");
             CheckWall(inputY);
@@ -1562,7 +1623,20 @@ namespace Game.Player
         private void FixedUpdate()
         {
             if (stats == null || input == null) return;
+
+            ValidatePreparedLandingRoll();
+            CaptureLandingRollAirborneState();
             if (externalControlLocked) return;
+
+            if (isLandingRolling)
+            {
+                CheckGround();
+                UpdateSprintTimers(Time.fixedDeltaTime);
+                sprintActive = false;
+                sprintWasGrounded = isGrounded;
+                FixedUpdateLandingRoll();
+                return;
+            }
 
             if (isFlagSpringPoleAttached)
             {
@@ -2148,7 +2222,7 @@ namespace Game.Player
         {
             if (carryable == null) return false;
             if (IsSwinging || isOverheadRailHanging || isFlagSpringPoleAttached ||
-                IsSliding || IsDiving)
+                IsSliding || IsDiving || IsLandingRolling)
                 return false;
             if (carriedObject != null && carriedObject != carryable) return false;
 
@@ -2246,7 +2320,8 @@ namespace Game.Player
                 return false;
             if (rb == null || !rb.simulated || capsule == null || !capsule.enabled)
                 return false;
-            if (isFlagSpringPoleAttached || isAttacking || IsMoveLockedByParry)
+            if (isFlagSpringPoleAttached || isAttacking || IsMoveLockedByParry ||
+                IsLandingRolling)
                 return false;
             return true;
         }
@@ -2361,7 +2436,7 @@ namespace Game.Player
             if (rb == null || !rb.simulated || capsule == null || !capsule.enabled) return false;
             if (swingHandAnchor == null || overheadRailJoint == null) return false;
             if (isOverheadRailHanging || isFlagSpringPoleAttached ||
-                IsSwinging || isHanging || isDashing)
+                IsSwinging || isHanging || isDashing || IsLandingRolling)
                 return false;
             if (IsSliding || IsDiving || IsPostDiveSliding) return false;
             if (isAttacking || IsMoveLockedByParry) return false;
@@ -2627,6 +2702,9 @@ namespace Game.Player
 
         private void HandlePlayerDamaged(int damage)
         {
+            CancelLandingRoll("damaged");
+            DiscardPreparedLandingRoll();
+
             if (isAttacking)
                 CancelAttack("damaged");
 
@@ -2643,6 +2721,9 @@ namespace Game.Player
         /// </summary>
         internal void PrepareForHitStun()
         {
+            CancelLandingRoll("hit-stun");
+            DiscardPreparedLandingRoll();
+
             if (isAttacking)
                 CancelAttack("hit-stun");
 
@@ -2703,7 +2784,7 @@ namespace Game.Player
         {
             if (pole == null) return false;
             if (IsSwinging || isOverheadRailHanging || isFlagSpringPoleAttached ||
-                isHanging || IsSliding || IsDiving)
+                isHanging || IsSliding || IsDiving || IsLandingRolling)
                 return false;
             if (swingCooldownTimer > 0f) return false;
             return pole.CanCatch(this, rb);
@@ -2713,7 +2794,7 @@ namespace Game.Player
         {
             if (pole == null) return false;
             if (IsSwinging || isOverheadRailHanging || isFlagSpringPoleAttached ||
-                isHanging || IsSliding || IsDiving)
+                isHanging || IsSliding || IsDiving || IsLandingRolling)
                 return false;
             if (swingCooldownTimer > 0f) return false;
             return pole.CanCatchDuringCoyote(this, rb);
@@ -2765,7 +2846,8 @@ namespace Game.Player
             if (point == null || !point.isActiveAndEnabled) return false;
             if (!enableLedgeGrab) return false;
             if (IsSwinging || isOverheadRailHanging || isFlagSpringPoleAttached ||
-                isHanging || isDashing || IsSliding || IsDiving || IsCarrying)
+                isHanging || isDashing || IsSliding || IsDiving || IsCarrying ||
+                IsLandingRolling)
                 return false;
             if (ledgeGrabCooldownTimer > 0f) return false;
             if (IsCrouching || IsLayDown) return false;
@@ -3482,6 +3564,534 @@ namespace Game.Player
         // --------------------
         // MOVE / PHYSICS
         // --------------------
+        public bool TryStartLandingRollFromLanding()
+        {
+            if (landingRollAcceptedThisLanding)
+                return true;
+
+            return TryResolvePendingLandingRoll();
+        }
+
+        private bool TryResolvePendingLandingRoll()
+        {
+            if (!landingRollLandingPending)
+                return false;
+
+            landingRollLandingPending = false;
+            landingRollHasBeenAirborne = false;
+            bool wasBlockedBeforeLanding = landingRollWasBlockedBeforeLanding;
+            landingRollWasBlockedBeforeLanding = false;
+
+            if (input == null)
+                return false;
+
+            Collider2D preparedGroundCollider = landingRollPreparedGroundCollider;
+            landingRollPreparedGroundCollider = null;
+            bool hasPreparedPress = input.TryConsumeLandingRollCrouchPress(
+                out InputReader.PlayerPosture originalPosture);
+            if (!hasPreparedPress)
+                return false;
+            if (originalPosture != InputReader.PlayerPosture.Standing)
+                return false;
+            if (!IsSameLandingRollSurface(
+                    preparedGroundCollider,
+                    currentGroundCollider))
+                return false;
+            if (!CanStartLandingRoll(wasBlockedBeforeLanding))
+                return false;
+
+            const string source = "PlayerController.TryStartLandingRollFromLanding";
+            if (!TryApplyPosture(InputReader.PlayerPosture.Standing, source))
+                return false;
+
+            input.ClaimCrouchGesture(source);
+            ClearSprintMomentum();
+            ResetSlopeMovementCarry();
+            jumpBufferTimer = 0f;
+            hasPendingNormalJump = false;
+            pendingNormalJumpTimer = 0f;
+            normalJumpAnticipationAge = 0f;
+
+            float landingInputX = Mathf.Clamp(input.MoveInput.x, -1f, 1f);
+            landingRollDirection = Mathf.Abs(landingInputX) > 0.05f
+                ? (int)Mathf.Sign(landingInputX)
+                : Mathf.Abs(lastAirborneHorizontalVelocityX) > 0.05f
+                    ? (int)Mathf.Sign(lastAirborneHorizontalVelocityX)
+                    : facingDir;
+            if (landingRollDirection == 0)
+                landingRollDirection = 1;
+
+            isLandingRolling = true;
+            landingRollAcceptedThisLanding = true;
+            landingRollElapsed = 0f;
+            landingRollDistanceTraveled = 0f;
+            landingRollStartPositionX = rb.position.x;
+            input.SetLandingRollGameplayInputSuppressed(true);
+            ApplyFacing(landingRollDirection);
+            DiscardInputsDuringLandingRoll();
+            animDriver?.ShowLandingRollPoseImmediately();
+
+            if (debugLogs)
+            {
+                Debug.Log(
+                    $"[LANDING ROLL] START direction={landingRollDirection} " +
+                    $"inputX={landingInputX:0.00} " +
+                    $"airborneVx={lastAirborneHorizontalVelocityX:0.00} " +
+                    $"startX={landingRollStartPositionX:0.000} " +
+                    $"speed={landingRollReferenceSpeed:0.00} " +
+                    $"duration={landingRollDuration:0.000} " +
+                    $"targetDistance={landingRollTargetDistance:0.00}");
+            }
+
+            return true;
+        }
+
+        private bool CanStartLandingRoll(bool wasBlockedBeforeLanding)
+        {
+            return
+                !wasBlockedBeforeLanding &&
+                isActiveAndEnabled &&
+                !externalControlLocked &&
+                rb != null &&
+                rb.simulated &&
+                rb.bodyType == RigidbodyType2D.Dynamic &&
+                capsule != null &&
+                capsule.enabled &&
+                isGrounded &&
+                !isLandingRolling &&
+                !HasLandingRollIncompatibleState() &&
+                !hasPendingNormalJump &&
+                !pendingDownHitBounce &&
+                !downHitBounceAscentProtected &&
+                rb.velocity.y <= 0.01f;
+        }
+
+        private bool HasLandingRollIncompatibleState()
+        {
+            return
+                isAttacking ||
+                isDashing ||
+                isWallSliding ||
+                isHanging ||
+                isLedgeClimbing ||
+                IsSwinging ||
+                isOverheadRailHanging ||
+                isFlagSpringPoleAttached ||
+                IsSliding ||
+                IsDiving ||
+                IsPostDiveSliding ||
+                IsMoveLockedByParry ||
+                IsCarrying;
+        }
+
+        private void HandleLandingRollCrouchPerformed()
+        {
+            if (input == null)
+                return;
+
+            // Cada pulsación nueva sustituye cualquier intención anterior. Solo
+            // se registra si la comprobación física es válida en este instante.
+            DiscardPreparedLandingRoll();
+            if (!CanPrepareLandingRollFromCrouchPress(out RaycastHit2D groundHit))
+                return;
+
+            input.RegisterLandingRollCrouchPress();
+            landingRollPreparedGroundCollider = groundHit.collider;
+            input.ClaimCrouchGesture("PlayerController.PrepareLandingRoll");
+            landingRollWasBlockedBeforeLanding = false;
+            if (debugLogs)
+            {
+                Debug.Log(
+                    $"[LANDING ROLL] ARMED groundDistance={groundHit.distance:0.000} " +
+                    $"vy={rb.velocity.y:0.00} " +
+                    $"ground={DescribeCollider2D(groundHit.collider)}");
+            }
+        }
+
+        private bool CanPrepareLandingRollFromCrouchPress(out RaycastHit2D groundHit)
+        {
+            groundHit = default;
+            if (!isActiveAndEnabled || externalControlLocked || input == null)
+                return false;
+            if (input.CurrentPosture != InputReader.PlayerPosture.Standing)
+                return false;
+            if (rb == null || !rb.simulated || rb.bodyType != RigidbodyType2D.Dynamic)
+                return false;
+            if (capsule == null || !capsule.enabled || isGrounded || isLandingRolling)
+                return false;
+            if (rb.velocity.y >= -0.01f)
+                return false;
+            if (HasLandingRollIncompatibleState() || hasPendingNormalJump ||
+                pendingDownHitBounce || downHitBounceAscentProtected)
+                return false;
+
+            return TryGetLandingRollGroundProximity(out groundHit);
+        }
+
+        private void ValidatePreparedLandingRoll()
+        {
+            if (input == null || !input.HasPendingLandingRollCrouchPress)
+            {
+                landingRollPreparedGroundCollider = null;
+                return;
+            }
+
+            bool invalidController =
+                !isActiveAndEnabled ||
+                externalControlLocked ||
+                rb == null ||
+                !rb.simulated ||
+                rb.bodyType != RigidbodyType2D.Dynamic ||
+                capsule == null ||
+                !capsule.enabled;
+            bool ascending = !isGrounded && rb != null && rb.velocity.y > 0.01f;
+            bool incompatible =
+                HasLandingRollIncompatibleState() ||
+                hasPendingNormalJump ||
+                pendingDownHitBounce ||
+                downHitBounceAscentProtected;
+            bool lostLandingSurface =
+                !isGrounded &&
+                !invalidController &&
+                (!TryGetLandingRollGroundProximity(out RaycastHit2D groundHit) ||
+                 !IsSameLandingRollSurface(
+                     landingRollPreparedGroundCollider,
+                     groundHit.collider));
+
+            if (!invalidController && !ascending && !incompatible && !lostLandingSurface)
+                return;
+
+            DiscardPreparedLandingRoll();
+            if (debugLogs)
+            {
+                string reason = invalidController
+                    ? "controller-invalid"
+                    : ascending
+                        ? "ascending"
+                        : incompatible
+                            ? "incompatible-state"
+                            : "landing-surface-lost";
+                Debug.Log($"[LANDING ROLL] PREPARATION CANCELED reason={reason}");
+            }
+        }
+
+        private bool TryGetLandingRollGroundProximity(out RaycastHit2D groundHit)
+        {
+            groundHit = default;
+            float maxDistance = Mathf.Max(0f, landingRollGroundProximity);
+            if (maxDistance <= 0f || capsule == null || !capsule.enabled)
+                return false;
+
+            int standardGroundMask = StandardGroundMask();
+            ContactFilter2D filter = new ContactFilter2D();
+            filter.SetLayerMask(standardGroundMask | standableActorMask.value);
+            filter.useLayerMask = true;
+            filter.useTriggers = false;
+
+            // Collider2D.Cast mide el desplazamiento de la propia cápsula hasta
+            // el contacto, por lo que esta distancia parte del borde inferior
+            // (los pies), no del centro o del transform del jugador.
+            int hitCount = capsule.Cast(
+                Vector2.down,
+                filter,
+                groundHits,
+                maxDistance);
+            float closestDistance = float.PositiveInfinity;
+            for (int i = 0; i < hitCount; i++)
+            {
+                RaycastHit2D candidate = groundHits[i];
+                if (candidate.collider == null || candidate.collider == capsule)
+                    continue;
+                if (candidate.collider.isTrigger)
+                    continue;
+                if (Physics2D.GetIgnoreCollision(capsule, candidate.collider))
+                    continue;
+                if (!IsAllowedGroundCollider(candidate.collider, standardGroundMask))
+                    continue;
+                if (candidate.normal.y < groundNormalMinY)
+                    continue;
+                if (candidate.distance > maxDistance ||
+                    candidate.distance >= closestDistance)
+                    continue;
+
+                closestDistance = candidate.distance;
+                groundHit = candidate;
+            }
+
+            return groundHit.collider != null;
+        }
+
+        private static bool IsSameLandingRollSurface(
+            Collider2D preparedCollider,
+            Collider2D candidateCollider)
+        {
+            if (preparedCollider == null || candidateCollider == null)
+                return false;
+            if (preparedCollider == candidateCollider)
+                return true;
+
+            Rigidbody2D preparedBody = preparedCollider.attachedRigidbody;
+            if (preparedBody != null &&
+                preparedBody == candidateCollider.attachedRigidbody)
+                return true;
+
+            PlayerStandableSurface preparedSurface =
+                GetAcceptedStandableSurface(preparedCollider);
+            return preparedSurface != null &&
+                   preparedSurface == GetAcceptedStandableSurface(candidateCollider);
+        }
+
+        private void CaptureLandingRollAirborneState()
+        {
+            if (rb == null || isGrounded || isLandingRolling)
+                return;
+
+            if (landingRollGroundStateInitialized)
+                landingRollHasBeenAirborne = true;
+            lastAirborneHorizontalVelocityX = rb.velocity.x;
+            landingRollWasBlockedBeforeLanding =
+                externalControlLocked || HasLandingRollIncompatibleState();
+        }
+
+        private void UpdateLandingRoll()
+        {
+            DiscardInputsDuringLandingRoll();
+        }
+
+        private void FixedUpdateLandingRoll()
+        {
+            if (!isLandingRolling)
+                return;
+
+            UpdateLandingRollDistanceTraveled();
+            bool hasPhysicalSupport = TryGetDiveSupportContact(out RaycastHit2D supportHit);
+            if (!isGrounded && !hasPhysicalSupport)
+            {
+                CancelLandingRoll("ground-contact-lost");
+                ApplyBetterJumpGravity();
+                return;
+            }
+
+            float safeDuration = Mathf.Max(0.05f, landingRollDuration);
+            float targetDistance = Mathf.Max(0f, landingRollTargetDistance);
+            float remainingDistance = Mathf.Max(
+                0f,
+                targetDistance - landingRollDistanceTraveled);
+            float completionTolerance = Mathf.Min(
+                LandingRollDistanceCompletionTolerance,
+                targetDistance * 0.1f);
+            if (targetDistance <= 0.0001f ||
+                remainingDistance <= completionTolerance)
+            {
+                FinishLandingRoll(true, "distance-complete");
+                ApplyMovingPlatformDelta();
+                return;
+            }
+
+            if (landingRollElapsed >= safeDuration)
+            {
+                FinishLandingRoll(true, "duration-safety-timeout");
+                ApplyMovingPlatformDelta();
+                return;
+            }
+
+            float activeStepTime = Mathf.Min(
+                Time.fixedDeltaTime,
+                Mathf.Max(0f, safeDuration - landingRollElapsed));
+            float physicsStepTime = Mathf.Max(0.0001f, Time.fixedDeltaTime);
+            float configuredSpeed = Mathf.Max(0f, landingRollReferenceSpeed);
+            // Rigidbody2D conserva esta velocidad durante el fixedDeltaTime
+            // completo. Limitarla con ese paso físico evita sobrepasar la
+            // distancia cuando la duración termina en una fracción de tick.
+            float rollSpeed = Mathf.Min(
+                configuredSpeed,
+                remainingDistance / physicsStepTime);
+            float nextVelocityX = landingRollDirection * rollSpeed;
+            float predictedVelocityX = nextVelocityX + CurrentConveyorVelocityX();
+            float horizontalStep = predictedVelocityX * physicsStepTime;
+            int obstacleProbeDirection = Mathf.Abs(predictedVelocityX) > 0.01f
+                ? (int)Mathf.Sign(predictedVelocityX)
+                : landingRollDirection;
+
+            if (TryGetWallHitOnSide(
+                    obstacleProbeDirection,
+                    Mathf.Max(
+                        Mathf.Max(0.005f, diveContactProbeDistance),
+                        Mathf.Abs(horizontalStep) + 0.005f),
+                    out RaycastHit2D frontHit))
+            {
+                FinishLandingRoll(
+                    true,
+                    $"front-contact:{DescribeCollider2D(frontHit.collider)}");
+                ApplyMovingPlatformDelta();
+                return;
+            }
+
+            if (rollSpeed <= 0.0001f ||
+                !HasLandingRollForwardSupport(horizontalStep))
+            {
+                FinishLandingRoll(true, "platform-edge-or-no-forward-support");
+                ApplyMovingPlatformDelta();
+                return;
+            }
+
+            Vector2 rollGroundNormal = isGrounded
+                ? groundNormal
+                : supportHit.normal.normalized;
+            bool useSlopeMovement =
+                rollGroundNormal.y >= groundNormalMinY &&
+                rollGroundNormal.y < SlopeNormalMaxY &&
+                !slopeMovementSuppressedUntilAirborne &&
+                currentGroundPlatform == null &&
+                currentGroundStandableSurface == null &&
+                currentGroundConveyor == null &&
+                currentGroundWoodWorkpiece == null;
+            if (useSlopeMovement)
+            {
+                Vector2 tangent = new Vector2(
+                    rollGroundNormal.y,
+                    -rollGroundNormal.x).normalized;
+                float surfaceSpeed = nextVelocityX / tangent.x;
+                Vector2 slopeVelocity =
+                    tangent * surfaceSpeed - rollGroundNormal * slopeStickSpeed;
+                slopeVelocity.x = nextVelocityX;
+                rb.velocity = slopeVelocity;
+                appliedConveyorVelocityX = 0f;
+            }
+            else
+            {
+                SetHorizontalVelocityWithConveyor(nextVelocityX);
+            }
+
+            landingRollElapsed += activeStepTime;
+            ApplyMovingPlatformDelta();
+        }
+
+        private void UpdateLandingRollDistanceTraveled()
+        {
+            if (rb == null || landingRollDirection == 0)
+                return;
+
+            float actualDistance = DirectedHorizontalDistance(
+                landingRollStartPositionX,
+                rb.position.x,
+                landingRollDirection);
+            landingRollDistanceTraveled = Mathf.Max(
+                landingRollDistanceTraveled,
+                actualDistance);
+        }
+
+        private bool HasLandingRollForwardSupport(float horizontalStep)
+        {
+            if (groundCheck == null)
+                return false;
+
+            int standardGroundMask = StandardGroundMask();
+            int mask = standardGroundMask | standableActorMask.value;
+            Vector2 size = new Vector2(
+                Mathf.Max(0.01f, groundCheckBoxSize.x),
+                Mathf.Max(0.01f, groundCheckBoxSize.y));
+            Vector2 origin =
+                (Vector2)groundCheck.position +
+                Vector2.right * horizontalStep +
+                Vector2.up * (size.y * 0.5f);
+            float castDistance = groundCheckDistance + size.y * 0.5f;
+            int hitCount = Physics2D.BoxCastNonAlloc(
+                origin,
+                size,
+                0f,
+                Vector2.down,
+                groundHits,
+                castDistance,
+                mask);
+
+            for (int i = 0; i < hitCount; i++)
+            {
+                RaycastHit2D candidate = groundHits[i];
+                if (candidate.collider == null || candidate.collider == capsule)
+                    continue;
+                if (candidate.collider.isTrigger)
+                    continue;
+                if (!IsAllowedGroundCollider(candidate.collider, standardGroundMask))
+                    continue;
+                if (candidate.normal.y < groundNormalMinY)
+                    continue;
+
+                return true;
+            }
+
+            return false;
+        }
+
+        private void DiscardInputsDuringLandingRoll()
+        {
+            if (input == null)
+                return;
+
+            InputReader.CrouchCommand crouchCommand = input.ConsumeCrouchPress();
+            if (crouchCommand.IsValid)
+                input.ClaimCrouchGesture("PlayerController.Update:LandingRoll");
+
+            DiscardPreparedLandingRoll();
+            input.ConsumeJumpPressed();
+            input.ConsumeAttackPressed();
+            input.ConsumeDashPressed();
+            input.ConsumeParryPressed();
+            input.ConsumeInteractPressed();
+            input.ConsumeDolphinDivePressed();
+            input.ClearSwingGrabBuffer();
+        }
+
+        private void DiscardPreparedLandingRoll()
+        {
+            input?.DiscardLandingRollCrouchPress();
+            landingRollPreparedGroundCollider = null;
+        }
+
+        private void CancelLandingRoll(string reason)
+        {
+            FinishLandingRoll(true, reason);
+        }
+
+        private void FinishLandingRoll(bool stopHorizontal, string reason)
+        {
+            if (!isLandingRolling)
+                return;
+
+            UpdateLandingRollDistanceTraveled();
+            float exitVelocityX = rb != null ? rb.velocity.x : 0f;
+            float completedDistance = landingRollDistanceTraveled;
+            float completedElapsed = landingRollElapsed;
+            float completedStartX = landingRollStartPositionX;
+            float completedEndX = rb != null ? rb.position.x : completedStartX;
+            float configuredTargetDistance = Mathf.Max(0f, landingRollTargetDistance);
+            float configuredDuration = Mathf.Max(0.05f, landingRollDuration);
+            isLandingRolling = false;
+            landingRollElapsed = 0f;
+            landingRollDistanceTraveled = 0f;
+            landingRollStartPositionX = 0f;
+            landingRollDirection = 0;
+            input?.SetLandingRollGameplayInputSuppressed(false);
+            animDriver?.ClearLandingRollVisualOverride();
+            ResetSlopeMovementCarry();
+
+            if (stopHorizontal && rb != null && rb.bodyType == RigidbodyType2D.Dynamic)
+                SetHorizontalVelocityWithConveyor(0f);
+
+            if (debugLogs)
+            {
+                Debug.Log(
+                    $"[LANDING ROLL] END reason={reason} " +
+                    $"distance={completedDistance:0.000} " +
+                    $"metric=directed-world-x " +
+                    $"startX={completedStartX:0.000} endX={completedEndX:0.000} " +
+                    $"target={configuredTargetDistance:0.000} " +
+                    $"elapsed={completedElapsed:0.000}/{configuredDuration:0.000} " +
+                    $"preExitVx={exitVelocityX:0.00} " +
+                    $"exitVx={(rb != null ? rb.velocity.x : 0f):0.00}");
+            }
+        }
+
         private bool HandleCrouchCommand(InputReader.CrouchCommand command)
         {
             if (CanStartSprintSlide(command))
@@ -5314,6 +5924,7 @@ namespace Game.Player
         // --------------------
         private void CheckGround()
         {
+            bool wasGroundedBeforeCheck = isGrounded;
             if (groundCheck == null)
             {
                 isGrounded = false;
@@ -5324,6 +5935,7 @@ namespace Game.Player
                 idleAnchorStandableSurface = null;
                 UpdateGroundConveyor(null, null);
                 slopeMovementSuppressedUntilAirborne = false;
+                TrackLandingRollGroundTransition(wasGroundedBeforeCheck);
                 return;
             }
 
@@ -5390,6 +6002,36 @@ namespace Game.Player
             {
                 lastGroundDebugCollider = bestHit.collider;
                 Debug.Log($"[GROUND DEBUG] grounded={isGrounded} hit={DescribeCollider2D(bestHit.collider)} point={bestHit.point} normal={bestHit.normal}");
+            }
+
+            TrackLandingRollGroundTransition(wasGroundedBeforeCheck);
+        }
+
+        private void TrackLandingRollGroundTransition(bool wasGroundedBeforeCheck)
+        {
+            if (!landingRollGroundStateInitialized)
+            {
+                landingRollGroundStateInitialized = true;
+                landingRollHasBeenAirborne = !isGrounded;
+                landingRollLandingPending = false;
+                landingRollAcceptedThisLanding = false;
+                return;
+            }
+
+            if (!isGrounded)
+            {
+                landingRollLandingPending = false;
+                if (!isLandingRolling)
+                    landingRollAcceptedThisLanding = false;
+                landingRollHasBeenAirborne = true;
+                return;
+            }
+
+            if (!wasGroundedBeforeCheck)
+            {
+                landingRollLandingPending = landingRollHasBeenAirborne;
+                landingRollAcceptedThisLanding = false;
+                landingRollHasBeenAirborne = false;
             }
         }
 
@@ -5537,6 +6179,7 @@ namespace Game.Player
             if (Mathf.Abs(input.MoveInput.x) > standableIdleInputThreshold)
                 return false;
             if (isDashing || isWallSliding || IsSliding || IsDiving || IsPostDiveSliding ||
+                IsLandingRolling ||
                 hasPendingNormalJump || IsSwinging || isHanging || isOverheadRailHanging)
                 return false;
             if (HasSprintMomentum() || horizontalAirCurrentMomentumActive)

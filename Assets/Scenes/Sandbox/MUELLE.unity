@@ -23121,6 +23121,10 @@ PrefabInstance:
       value: 7
       objectReference: {fileID: 0}
     - target: {fileID: 2901667793802344536, guid: cb726ebdb33aaa34c8cf57c835750608, type: 3}
+      propertyPath: landingRollDuration
+      value: 0.35
+      objectReference: {fileID: 0}
+    - target: {fileID: 2901667793802344536, guid: cb726ebdb33aaa34c8cf57c835750608, type: 3}
       propertyPath: postDiveSlideStopSpeed
       value: 0.1
       objectReference: {fileID: 0}
@@ -23129,8 +23133,16 @@ PrefabInstance:
       value: 0.45
       objectReference: {fileID: 0}
     - target: {fileID: 2901667793802344536, guid: cb726ebdb33aaa34c8cf57c835750608, type: 3}
+      propertyPath: landingRollTargetDistance
+      value: 3
+      objectReference: {fileID: 0}
+    - target: {fileID: 2901667793802344536, guid: cb726ebdb33aaa34c8cf57c835750608, type: 3}
       propertyPath: postDiveSlideDeceleration
       value: 18
+      objectReference: {fileID: 0}
+    - target: {fileID: 2901667793802344536, guid: cb726ebdb33aaa34c8cf57c835750608, type: 3}
+      propertyPath: landingRollGroundProximity
+      value: 2
       objectReference: {fileID: 0}
     - target: {fileID: 2901667793802344536, guid: cb726ebdb33aaa34c8cf57c835750608, type: 3}
       propertyPath: requirePushIntoWallForSlide

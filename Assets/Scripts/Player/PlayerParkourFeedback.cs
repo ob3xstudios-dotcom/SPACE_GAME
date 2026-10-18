@@ -583,11 +583,17 @@ namespace Game.Player
 
         private void OnLanded(float downSpeed)
         {
-            string eventId = downSpeed < minLandingSpeed
-                ? null
-                : downSpeed >= hardLandingSpeed
-                    ? HardLandEventId
-                    : LandEventId;
+            bool hardLanding = downSpeed >= hardLandingSpeed;
+            bool landingRollStarted =
+                controller != null &&
+                controller.TryStartLandingRollFromLanding();
+            string eventId = landingRollStarted
+                ? LandEventId
+                : downSpeed < minLandingSpeed
+                    ? null
+                    : hardLanding
+                        ? HardLandEventId
+                        : LandEventId;
 
             if (string.IsNullOrEmpty(eventId)) return;
 
@@ -849,7 +855,8 @@ namespace Game.Player
                 controller.IsSwinging ||
                 controller.IsSliding ||
                 controller.IsDiving ||
-                controller.IsPostDiveSliding;
+                controller.IsPostDiveSliding ||
+                controller.IsLandingRolling;
 
             if (locomotionBlocked || groundCollider != sampledGroundCollider)
             {

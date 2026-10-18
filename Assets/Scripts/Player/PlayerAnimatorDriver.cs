@@ -47,6 +47,8 @@ namespace Game.Player
         [Header("Crouch / LayDown Params")]
         [SerializeField] private string crouchBool = "Crouch";
         [SerializeField] private string layDownBool = "LayDown";
+        [SerializeField] private string crouchStateName =
+            "Base Layer.Locomotion.Monkey_Crouch";
 
         [Header("Sprint Slide / Forward Dive Params")]
         [SerializeField] private string slidingBool = "Sliding";
@@ -132,7 +134,10 @@ namespace Game.Player
             float speedX = Mathf.Abs(rb.velocity.x);
             float vy = rb.velocity.y;
             bool isGrounded = controller != null && controller.IsGrounded;
-            float visualSpeedX = GetVisualSpeedX(speedX, isGrounded);
+            bool isLandingRolling = controller != null && controller.IsLandingRolling;
+            float visualSpeedX = isLandingRolling
+                ? 0f
+                : GetVisualSpeedX(speedX, isGrounded);
             float maxRunSpeed = controller != null && controller.stats != null
                 ? controller.stats.maxRunSpeed
                 : 0f;
@@ -166,7 +171,7 @@ namespace Game.Player
                     controller != null && controller.IsOverheadRailStealthHanging);
             }
             if (hasGroundedSample && !wasGrounded && isGrounded &&
-                !isDiving && !wasDiving &&
+                !isDiving && !wasDiving && !isLandingRolling &&
                 (controller == null || !controller.IsNormalJumpAnticipating))
                 TriggerJumpEnd();
             wasGrounded = isGrounded;
@@ -195,17 +200,57 @@ namespace Game.Player
                 isPushingIntoWall,
                 isSwinging || isSliding || isDiving);
 
-            // Crouch/LayDown desde InputReader (si existe)
+            // LandingRoll reutiliza solo la pose visual de crouch. La postura y
+            // el collider siguen bajo el control normal de InputReader/Controller.
             var input = controller != null ? controller.input : null;
-            if (input != null)
-            {
-                anim.SetBool(crouchHash, input.IsCrouching);
-                anim.SetBool(layDownHash, input.IsLayDown);
-            }
+            ApplyCrouchVisualParameters(isLandingRolling, input);
 
             anim.SetInteger(attackDirHash, cachedAttackDir);
             if (hasIsAttackingParam)
                 anim.SetBool(isAttackingHash, controller != null && controller.IsAttacking);
+        }
+
+        public void ShowLandingRollPoseImmediately()
+        {
+            if (anim == null)
+                return;
+
+            jumpEndVisualLockTimer = 0f;
+            if (hasJumpStartParam)
+                anim.ResetTrigger(jumpStartHash);
+            if (hasJumpEndParam)
+                anim.ResetTrigger(jumpEndHash);
+
+            anim.SetFloat(speedHash, 0f);
+            ApplyCrouchVisualParameters(true, controller != null ? controller.input : null);
+            PlayManual(crouchStateName);
+
+            // Puede iniciarse después de PlayerAnimatorDriver.Update según el
+            // orden de scripts. Evaluar a tiempo cero aplica la pose este frame.
+            if (anim.isActiveAndEnabled)
+                anim.Update(0f);
+        }
+
+        public void ClearLandingRollVisualOverride()
+        {
+            if (anim == null)
+                return;
+
+            ApplyCrouchVisualParameters(false, controller != null ? controller.input : null);
+            if (anim.isActiveAndEnabled)
+                anim.Update(0f);
+        }
+
+        private void ApplyCrouchVisualParameters(
+            bool landingRolling,
+            Game.Input.InputReader input)
+        {
+            anim.SetBool(
+                crouchHash,
+                landingRolling || (input != null && input.IsCrouching));
+            anim.SetBool(
+                layDownHash,
+                !landingRolling && input != null && input.IsLayDown);
         }
 
         private float GetVisualSpeedX(float speedX, bool isGrounded)

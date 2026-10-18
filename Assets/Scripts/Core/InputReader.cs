@@ -50,6 +50,9 @@ namespace Game.Input
         public bool IsCrouching => posture == PlayerPosture.Crouching;
         public bool IsLayDown => posture == PlayerPosture.LayDown;
         public int GameplayActionPressVersion { get; private set; }
+        public event System.Action LandingRollCrouchPerformed;
+        public bool HasPendingLandingRollCrouchPress =>
+            landingRollCrouchPressVersion != consumedLandingRollCrouchPressVersion;
 
         private bool jumpPressed;
         private bool attackPressed;
@@ -58,6 +61,7 @@ namespace Game.Input
         private bool interactPressed;
         private bool mapPressed;
         private bool skillsPressed;
+        private bool landingRollGameplayInputSuppressed;
         private int dolphinDivePressedFrame = -1;
         private int swingGrabPressedFrame = -1;
         private int swingGrabConsumedFrame = -1;
@@ -82,6 +86,9 @@ namespace Game.Input
         private bool crouchGestureClaimed;
         private CrouchCommand pendingCrouchCommand;
         private int pendingCrouchPressFrame = -1;
+        private int landingRollCrouchPressVersion;
+        private int consumedLandingRollCrouchPressVersion;
+        private PlayerPosture landingRollCrouchOriginalPosture;
         private string activeCrouchControlPath = "<none>";
 
         private void Awake()
@@ -191,9 +198,11 @@ namespace Game.Input
             interactPressed = false;
             mapPressed = false;
             skillsPressed = false;
+            landingRollGameplayInputSuppressed = false;
             dolphinDivePressedFrame = -1;
 
             ResetCrouchPressTracking();
+            ResetLandingRollCrouchPressTracking();
             ClearSwingGrabBuffer();
         }
 
@@ -279,9 +288,30 @@ namespace Game.Input
 
         public bool ConsumeParryPressed()
         {
+            if (landingRollGameplayInputSuppressed)
+            {
+                parryPressed = false;
+                return false;
+            }
+
             if (!parryPressed) return false;
             parryPressed = false;
             return true;
+        }
+
+        public void SetLandingRollGameplayInputSuppressed(bool suppressed)
+        {
+            landingRollGameplayInputSuppressed = suppressed;
+            if (!suppressed)
+                return;
+
+            jumpPressed = false;
+            attackPressed = false;
+            dashPressed = false;
+            parryPressed = false;
+            interactPressed = false;
+            dolphinDivePressedFrame = -1;
+            ClearSwingGrabBuffer();
         }
 
         public bool ConsumeInteractPressed()
@@ -379,6 +409,22 @@ namespace Game.Input
 
             ClearPendingCrouchPress();
             return result;
+        }
+
+        public bool TryConsumeLandingRollCrouchPress(
+            out PlayerPosture originalPosture)
+        {
+            originalPosture = landingRollCrouchOriginalPosture;
+            if (!HasPendingLandingRollCrouchPress)
+                return false;
+
+            consumedLandingRollCrouchPressVersion = landingRollCrouchPressVersion;
+            return true;
+        }
+
+        public void DiscardLandingRollCrouchPress()
+        {
+            consumedLandingRollCrouchPressVersion = landingRollCrouchPressVersion;
         }
 
         public void CommitPostureTransition(CrouchCommand command, string source)
@@ -532,6 +578,22 @@ namespace Game.Input
             crouchGestureClaimed = false;
             ClearPendingCrouchPress();
             activeCrouchControlPath = "<none>";
+        }
+
+        public void RegisterLandingRollCrouchPress()
+        {
+            landingRollCrouchPressVersion = landingRollCrouchPressVersion == int.MaxValue
+                ? 1
+                : landingRollCrouchPressVersion + 1;
+            consumedLandingRollCrouchPressVersion = 0;
+            landingRollCrouchOriginalPosture = crouchGestureOriginalPosture;
+        }
+
+        private void ResetLandingRollCrouchPressTracking()
+        {
+            landingRollCrouchPressVersion = 0;
+            consumedLandingRollCrouchPressVersion = 0;
+            landingRollCrouchOriginalPosture = posture;
         }
 
         public void ResetStealthWalkHeld()
@@ -781,6 +843,20 @@ namespace Game.Input
             longCrouchTriggeredThisHold = false;
             crouchGestureClaimed = false;
             RegisterGameplayActionPress();
+            LandingRollCrouchPerformed?.Invoke();
+            if (crouchGestureClaimed)
+            {
+                LogCrouchDiagnostic(
+                    "performed.claimed",
+                    activeCrouchControlPath,
+                    controlValue,
+                    $"phase={ctx.phase} result=no_posture_order");
+
+                if (debugInput)
+                    Debug.Log("[INPUT] CROUCH performed and claimed");
+                return;
+            }
+
             bool previewCrouchingFromLayDown =
                 crouchGestureOriginalPosture == PlayerPosture.LayDown;
             bool deferShortUntilCanceled =
