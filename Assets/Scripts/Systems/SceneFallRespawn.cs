@@ -1,3 +1,4 @@
+using System.Collections;
 using Cinemachine;
 using Game.Currency;
 using Game.Player;
@@ -16,6 +17,7 @@ namespace Game.Systems
         [Header("Fall Respawn")]
         [SerializeField] private Transform player;
         [SerializeField] private string playerTag = "Player";
+        [SerializeField] private bool enableGlobalFallCheck = true;
         [SerializeField] private float fallY = -11f;
 
         [Header("Debug")]
@@ -24,37 +26,64 @@ namespace Game.Systems
         private bool reloading;
         private bool fallInProgress;
         private PlayerController playerController;
+        private PlayerHealth playerHealth;
+        private PlayerHealth subscribedPlayerHealth;
         private Rigidbody2D playerRb;
+        private Coroutine rearmRoutine;
 
         private void Awake()
         {
             ResolveRefs();
         }
 
+        private void OnEnable()
+        {
+            ResolveRefs();
+            RefreshRespawnSubscription();
+        }
+
+        private void OnDisable()
+        {
+            UnsubscribeFromPlayerRespawn();
+
+            if (rearmRoutine != null)
+            {
+                StopCoroutine(rearmRoutine);
+                rearmRoutine = null;
+            }
+
+            fallInProgress = false;
+        }
+
         private void Update()
         {
             if (!IsSceneEnabled()) return;
+            if (!enableGlobalFallCheck) return;
 
             ResolveRefs();
             if (player == null) return;
             if (reloading) return;
-
-            if (fallInProgress)
-            {
-                if (player.position.y >= fallY)
-                    fallInProgress = false;
-                return;
-            }
-
             if (player.position.y >= fallY) return;
+
+            RequestFatalFall(player);
+        }
+
+        public bool RequestFatalFall(Transform fallingPlayer)
+        {
+            if (!isActiveAndEnabled || !IsSceneEnabled()) return false;
+            if (fallingPlayer == null || reloading || fallInProgress) return false;
+
+            SetPlayer(fallingPlayer);
+            if (player == null) return false;
 
             fallInProgress = true;
             CurrencyService.Instance.HandleFatalFall(player);
 
             if (TryRespawnWithGameManager())
-                return;
+                return true;
 
             ReloadActiveScene();
+            return true;
         }
 
         private bool IsSceneEnabled()
@@ -168,16 +197,84 @@ namespace Game.Systems
             {
                 GameObject playerGo = GameObject.FindGameObjectWithTag(playerTag);
                 if (playerGo != null)
-                    player = playerGo.transform;
+                    SetPlayer(playerGo.transform);
             }
 
+            if (player == null) return;
+            SetPlayer(player);
+        }
+
+        private void SetPlayer(Transform candidate)
+        {
+            if (candidate == null) return;
+
+            PlayerHealth candidateHealth =
+                candidate.GetComponent<PlayerHealth>() ??
+                candidate.GetComponentInParent<PlayerHealth>() ??
+                candidate.GetComponentInChildren<PlayerHealth>(true);
+            Transform resolvedPlayer = candidateHealth != null
+                ? candidateHealth.transform
+                : candidate;
+
+            if (player != resolvedPlayer)
+            {
+                UnsubscribeFromPlayerRespawn();
+                player = resolvedPlayer;
+                playerController = null;
+                playerHealth = candidateHealth;
+                playerRb = null;
+            }
+
+            ResolvePlayerComponents();
+            RefreshRespawnSubscription();
+        }
+
+        private void ResolvePlayerComponents()
+        {
             if (player == null) return;
 
             if (playerController == null)
                 playerController = player.GetComponent<PlayerController>() ?? player.GetComponentInChildren<PlayerController>(true);
 
+            if (playerHealth == null)
+                playerHealth = player.GetComponent<PlayerHealth>() ?? player.GetComponentInChildren<PlayerHealth>(true);
+
             if (playerRb == null)
                 playerRb = player.GetComponent<Rigidbody2D>() ?? player.GetComponentInChildren<Rigidbody2D>(true);
+        }
+
+        private void RefreshRespawnSubscription()
+        {
+            if (!isActiveAndEnabled || subscribedPlayerHealth == playerHealth) return;
+
+            UnsubscribeFromPlayerRespawn();
+            if (playerHealth == null) return;
+
+            playerHealth.OnRespawned += HandlePlayerRespawned;
+            subscribedPlayerHealth = playerHealth;
+        }
+
+        private void UnsubscribeFromPlayerRespawn()
+        {
+            if (subscribedPlayerHealth != null)
+                subscribedPlayerHealth.OnRespawned -= HandlePlayerRespawned;
+
+            subscribedPlayerHealth = null;
+        }
+
+        private void HandlePlayerRespawned()
+        {
+            if (rearmRoutine != null)
+                StopCoroutine(rearmRoutine);
+
+            rearmRoutine = StartCoroutine(RearmAfterRespawn());
+        }
+
+        private IEnumerator RearmAfterRespawn()
+        {
+            yield return null;
+            fallInProgress = false;
+            rearmRoutine = null;
         }
     }
 }

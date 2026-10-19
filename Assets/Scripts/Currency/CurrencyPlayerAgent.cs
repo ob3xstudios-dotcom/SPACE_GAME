@@ -251,6 +251,7 @@ namespace Game.Currency
                     string typeName = behaviour.GetType().Name;
                     if (typeName.Contains("Hazard") ||
                         typeName.Contains("DamageZone") ||
+                        typeName.Contains("DeathVolume") ||
                         typeName.Contains("SawTrap") ||
                         typeName.Contains("SplitterSaw") ||
                         typeName.Contains("DisposalTrigger"))
