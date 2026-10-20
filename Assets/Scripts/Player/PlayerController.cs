@@ -2,6 +2,7 @@ using System;
 using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
+using UnityEngine.Serialization;
 using UnityEngine.Tilemaps;
 using Game.Barrels;
 using Game.Interaction;
@@ -263,9 +264,9 @@ namespace Game.Player
         // STEALTH MOVEMENT
         // --------------------
         [Header("Stealth Movement")]
-        [SerializeField, Range(0.1f, 1f)] private float crouchSpeedMultiplier = 0.6f;
-        [SerializeField, Range(0.1f, 1f)] private float layDownSpeedMultiplier = 0.35f;
-        [SerializeField, Range(0.1f, 1f)] private float stealthWalkSpeedMultiplier = 0.5f;
+        [FormerlySerializedAs("layDownSpeedMultiplier")]
+        [SerializeField, Range(0.1f, 1f)] private float lowPostureSpeedMultiplier = 0.35f;
+        [SerializeField, Range(0.1f, 1f)] private float stealthWalkSpeedMultiplier = 0.68f;
         [SerializeField, Range(0.1f, 0.95f)] private float analogStealthWalkMaxMagnitude = 0.55f;
         [SerializeField, Min(1f)] private float sprintSpeedMultiplier = 1.4f;
         [SerializeField, Min(0f)] private float sprintMaxDuration = 1f;
@@ -5100,6 +5101,42 @@ namespace Game.Player
                    moveMagnitude <= Mathf.Clamp01(analogStealthWalkMaxMagnitude);
         }
 
+        private float RemapAutomaticAnalogStealthInput(float inputX)
+        {
+            if (!isGrounded ||
+                IsCrouching ||
+                IsLayDown ||
+                input == null ||
+                input.StealthWalkHeld ||
+                !input.MoveInputIsGamepad ||
+                sprintActive)
+            {
+                return inputX;
+            }
+
+            float moveMagnitude = input.MoveMagnitude01;
+            if (moveMagnitude <= 0.0001f)
+                return inputX;
+
+            float stealthInputRange = Mathf.Max(
+                0.0001f,
+                Mathf.Clamp01(analogStealthWalkMaxMagnitude));
+            float horizontalDirection = inputX / moveMagnitude;
+            if (moveMagnitude <= stealthInputRange)
+            {
+                float normalizedStealthMagnitude = Mathf.Clamp01(
+                    moveMagnitude / stealthInputRange);
+                return horizontalDirection * normalizedStealthMagnitude;
+            }
+
+            float normalMovementCrossover = Mathf.Clamp01(
+                stealthWalkSpeedMultiplier);
+            if (moveMagnitude < normalMovementCrossover)
+                return horizontalDirection * normalMovementCrossover;
+
+            return inputX;
+        }
+
         private void Move()
         {
             // Preserve the exact takeoff velocity until the ground probe confirms airborne.
@@ -5121,13 +5158,13 @@ namespace Game.Player
             }
 
             float stanceMult = 1f;
-            if (IsLayDown) stanceMult = layDownSpeedMultiplier;
-            else if (IsCrouching) stanceMult = crouchSpeedMultiplier;
+            if (IsLayDown || IsCrouching) stanceMult = lowPostureSpeedMultiplier;
             else if (IsStealthWalking) stanceMult = stealthWalkSpeedMultiplier;
             else if (sprintActive) stanceMult = sprintSpeedMultiplier;
             if (IsCarrying) stanceMult *= carryingMoveSpeedMultiplier;
 
-            float targetSpeed = inputX * GetEffectiveRunSpeed() * stanceMult;
+            float speedInputX = RemapAutomaticAnalogStealthInput(inputX);
+            float targetSpeed = speedInputX * GetEffectiveRunSpeed() * stanceMult;
             targetSpeed = ApplySprintMomentumTarget(inputX, targetSpeed);
             if (hasPendingNormalJump)
                 targetSpeed *= jumpAnticipationMoveSpeedMultiplier;

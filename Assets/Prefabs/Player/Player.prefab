@@ -222,7 +222,7 @@ MonoBehaviour:
   tankDownHitSupportIgnoreMaxDuration: 0.35
   crouchSpeedMultiplier: 0.6
   layDownSpeedMultiplier: 0.35
-  stealthWalkSpeedMultiplier: 0.5
+  stealthWalkSpeedMultiplier: 0.68
   analogStealthWalkMaxMagnitude: 0.55
   sprintSpeedMultiplier: 1.4
   sprintMaxDuration: 1
