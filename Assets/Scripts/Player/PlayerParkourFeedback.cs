@@ -50,6 +50,7 @@ namespace Game.Player
         [SerializeField] private PlayerController controller;
         [SerializeField] private Rigidbody2D rb;
         [SerializeField] private CapsuleCollider2D capsule;
+        [SerializeField] private PlayerGameplayNoiseEmitter2D gameplayNoiseEmitter;
         [SerializeField] private Transform visualRoot;
         [SerializeField] private SpriteRenderer[] visualRenderers;
 
@@ -69,6 +70,7 @@ namespace Game.Player
         [SerializeField, Min(0.1f)] private float walkStepDistance = 1.35f;
         [SerializeField, Min(0.1f)] private float runStepDistance = 1.6f;
         [SerializeField, Min(0f)] private float minFootstepInterval = 0.12f;
+        [SerializeField, Range(0f, 1f)] private float stealthFootstepVolumeMultiplier = 0.28f;
 
         [Header("Continuous Movement Audio")]
         [SerializeField, Min(0f)] private float minSwingLoopSpeed = 1.25f;
@@ -131,6 +133,8 @@ namespace Game.Player
             if (controller == null) controller = GetComponent<PlayerController>();
             if (rb == null) rb = GetComponent<Rigidbody2D>();
             if (capsule == null) capsule = GetComponent<CapsuleCollider2D>();
+            if (gameplayNoiseEmitter == null)
+                gameplayNoiseEmitter = GetComponent<PlayerGameplayNoiseEmitter2D>();
             if (combatImpulseSource == null) combatImpulseSource = GetComponent<CinemachineImpulseSource>();
             ConfigureCombatImpulseSource();
             playerParry = GetComponent<PlayerParry>();
@@ -189,9 +193,12 @@ namespace Game.Player
             combatImpulseCooldown = Mathf.Max(0f, combatImpulseCooldown);
             attackImpactImpulse = Mathf.Max(0f, attackImpactImpulse);
             damageReceivedImpulse = Mathf.Max(0f, damageReceivedImpulse);
+            stealthFootstepVolumeMultiplier = Mathf.Clamp01(stealthFootstepVolumeMultiplier);
 
             if (combatImpulseSource == null)
                 combatImpulseSource = GetComponent<CinemachineImpulseSource>();
+            if (gameplayNoiseEmitter == null)
+                gameplayNoiseEmitter = GetComponent<PlayerGameplayNoiseEmitter2D>();
 
             ConfigureCombatImpulseSource();
         }
@@ -376,7 +383,10 @@ namespace Game.Player
                 OnLanded(ConsumeLandingDownSpeed());
 
             if (dashing && !wasDashing)
+            {
+                gameplayNoiseEmitter?.EmitDash(transform.position);
                 AudioService.PlayAt(DashEventId, transform.position);
+            }
 
             if (sprinting && !wasSprinting)
                 AudioService.PlayAt(SprintStartEventId, transform.position);
@@ -487,11 +497,15 @@ namespace Game.Player
             }
 
             if (currentState == PlayerController.SprintSlideDiveState.Slide && !previousWasGroundSlide)
+            {
+                gameplayNoiseEmitter?.EmitSlide(transform.position);
                 AudioService.PlayAt(SlideStartEventId, transform.position);
+            }
 
             if (currentState == PlayerController.SprintSlideDiveState.Dive &&
                 previousState != PlayerController.SprintSlideDiveState.Dive)
             {
+                gameplayNoiseEmitter?.EmitDive(transform.position);
                 AudioService.PlayAt(DolphinDiveEventId, transform.position);
             }
         }
@@ -595,6 +609,8 @@ namespace Game.Player
                         ? HardLandEventId
                         : LandEventId;
 
+            if (hardLanding && !landingRollStarted)
+                gameplayNoiseEmitter?.EmitHardLanding(transform.position);
             if (string.IsNullOrEmpty(eventId)) return;
 
             PositionAtFeet(landBurst);
@@ -630,6 +646,7 @@ namespace Game.Player
                     break;
             }
 
+            gameplayNoiseEmitter?.EmitAttackImpact(hitPosition);
             AudioService.PlayAt(eventId, hitPosition);
             GenerateCombatCameraImpulse(
                 attackImpactImpulse,
@@ -639,6 +656,7 @@ namespace Game.Player
         private void OnParrySucceeded(Game.Enemies.EnemyBase enemy)
         {
             Vector3 position = enemy != null ? enemy.transform.position : transform.position;
+            gameplayNoiseEmitter?.EmitParry(position);
             AudioService.PlayAt(ParrySuccessEventId, position);
         }
 
@@ -882,7 +900,8 @@ namespace Game.Player
                 return;
             }
 
-            bool running = Mathf.Abs(rb.velocity.x) >= runFootstepSpeed;
+            bool stealthFootstep = controller.IsStealthModeActive;
+            bool running = !stealthFootstep && Mathf.Abs(rb.velocity.x) >= runFootstepSpeed;
             float stepDistance = running ? runStepDistance : walkStepDistance;
             footstepDistance += relativeDelta.magnitude;
 
@@ -895,18 +914,24 @@ namespace Game.Player
             footstepDistance = Mathf.Repeat(footstepDistance, stepDistance);
             lastFootstepTime = Time.time;
 
+            gameplayNoiseEmitter?.EmitFootstep(running, transform.position);
             AudioEventDefinition surfaceEvent = sampledFootstepSurface != null
                 ? sampledFootstepSurface.GetEvent(running)
                 : null;
+            AudioPlaybackHandle footstepHandle;
             if (surfaceEvent != null)
             {
-                AudioService.PlayAt(surfaceEvent, transform.position);
-                return;
+                footstepHandle = AudioService.PlayAt(surfaceEvent, transform.position);
+            }
+            else
+            {
+                footstepHandle = AudioService.PlayAt(
+                    running ? FootstepRunEventId : FootstepWalkEventId,
+                    transform.position);
             }
 
-            AudioService.PlayAt(
-                running ? FootstepRunEventId : FootstepWalkEventId,
-                transform.position);
+            if (stealthFootstep)
+                footstepHandle.SetVolume(stealthFootstepVolumeMultiplier);
         }
 
         private void ResetFootstepTracking()

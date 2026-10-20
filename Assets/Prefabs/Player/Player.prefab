@@ -27,6 +27,7 @@ GameObject:
   - component: {fileID: 8527387430506389013}
   - component: {fileID: 1097569777515970473}
   - component: {fileID: 6723490123456789012}
+  - component: {fileID: 930000000000000001}
   - component: {fileID: 3196452078164205739}
   - component: {fileID: 4486341029457206118}
   - component: {fileID: 7463829102847561930}
@@ -674,6 +675,7 @@ MonoBehaviour:
   controller: {fileID: 2901667793802344536}
   rb: {fileID: 3521601697932617640}
   capsule: {fileID: 6266200590295163230}
+  gameplayNoiseEmitter: {fileID: 930000000000000001}
   visualRoot: {fileID: 0}
   visualRenderers: []
   audioSource: {fileID: 0}
@@ -689,6 +691,7 @@ MonoBehaviour:
   landVolume: 0.55
   minLandingSpeed: 6
   hardLandingSpeed: 14
+  stealthFootstepVolumeMultiplier: 0.28
   combatImpulseSource: {fileID: 4486341029457206118}
   attackImpactImpulse: 0.12
   damageReceivedImpulse: 0.2
@@ -700,6 +703,29 @@ MonoBehaviour:
   enableWallSlideTint: 1
   wallSlideTint: {r: 0.78, g: 0.92, b: 1, a: 1}
   wallSlideTintLerp: 18
+--- !u!114 &930000000000000001
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 933070315492324510}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: fe3af0378fba4ede860eff33b298f09e, type: 3}
+  m_Name:
+  m_EditorClassIdentifier:
+  noiseChannel: {fileID: 11400000, guid: d4f47ed7d05044a19d410124e63e6e06, type: 2}
+  stealthFootstepIntensity: 0
+  walkFootstepIntensity: 0.25
+  runFootstepIntensity: 0.55
+  hardLandingIntensity: 1
+  dashIntensity: 0.85
+  slideIntensity: 0.8
+  diveIntensity: 1
+  attackImpactIntensity: 0.75
+  parryIntensity: 0.9
+  controller: {fileID: 2901667793802344536}
 --- !u!114 &3196452078164205739
 MonoBehaviour:
   m_ObjectHideFlags: 0
