@@ -2,6 +2,7 @@
 using System;
 using UnityEngine;
 using Game.Systems;
+using Game.Combat;
 
 namespace Game.Player
 {
@@ -49,8 +50,15 @@ namespace Game.Player
         private float cdT;
         private float windowT;
         private float failT;
+        private bool projectileParryResolvedThisWindow;
+        private readonly Collider2D[] projectileParryHits = new Collider2D[16];
 
         public event Action<Game.Enemies.EnemyBase> ParrySucceeded;
+        public bool IsProjectileParryWindowActive =>
+            isActiveAndEnabled &&
+            parryUnlocked &&
+            windowT > 0f &&
+            !projectileParryResolvedThisWindow;
 
         private void Awake()
         {
@@ -69,6 +77,10 @@ namespace Game.Player
             failT -= Time.deltaTime;
 
             if (!parryUnlocked) return;
+
+            if (IsProjectileParryWindowActive)
+                TryParryProjectileInRange();
+
             if (input == null) return;
 
             if (controller != null &&
@@ -107,6 +119,7 @@ namespace Game.Player
 
             cdT = parryCooldown;
             windowT = parryWindow;
+            projectileParryResolvedThisWindow = false;
 
             animDriver?.TriggerParry();
             controller?.LockMovement(movementLockSeconds);
@@ -180,14 +193,115 @@ namespace Game.Player
                 if (debugLogs)
                     Debug.Log($"[PARRY] SUCCESS on {enemy.name}");
 
+                // Melee keeps its existing priority and consumes this parry attempt.
+                projectileParryResolvedThisWindow = true;
+                windowT = 0f;
                 ParrySucceeded?.Invoke(enemy);
                 return true;
             }
+
+            // Preserve melee priority and existing EnemyBase behaviour. Projectiles
+            // are considered only when no melee enemy resolved this button press.
+            if (TryParryProjectiles(hits, hits.Length))
+                return true;
 
             if (debugLogs)
                 Debug.Log("[PARRY] enemies found, but none were parryable");
 
             return false;
+        }
+
+        /// <summary>
+        /// Projectile-side fallback used when a swept projectile reaches the Player
+        /// during the active window. It never grants general invulnerability.
+        /// </summary>
+        public bool TryParryProjectile(IParryableProjectile projectile)
+        {
+            if (!IsProjectileParryWindowActive || projectile == null || !projectile.IsParryable)
+                return false;
+
+            Collider2D projectileCollider = projectile.ParryCollider;
+            if (projectileCollider == null || !projectileCollider.enabled)
+                return false;
+
+            int projectileLayer = 1 << projectileCollider.gameObject.layer;
+            if ((enemyLayer.value & projectileLayer) == 0)
+                return false;
+
+            Vector2 origin = transform.position;
+            Vector2 direction = GetParryDirection();
+            Vector2 hitPosition = origin + direction * forwardOffset;
+            Vector2 toProjectile = projectile.Position - origin;
+
+            if (Vector2.Dot(toProjectile, direction) <= 0f)
+                return false;
+
+            Vector2 closestPoint = projectileCollider.ClosestPoint(hitPosition);
+            if ((closestPoint - hitPosition).sqrMagnitude > radius * radius)
+                return false;
+
+            var context = new ProjectileParryContext(transform, origin, direction);
+            ProjectileParryResolution resolution = projectile.ResolveParry(
+                ProjectileParryAction.Destroy,
+                context);
+            if (resolution != ProjectileParryResolution.Destroyed)
+                return false;
+
+            projectileParryResolvedThisWindow = true;
+            windowT = 0f;
+            failT = 0f;
+            stamina?.RestoreStamina(parryStaminaGain);
+
+            if (successHitStop > 0f)
+                HitStopManager.Request(successHitStop);
+
+            if (debugLogs)
+                Debug.Log($"[PARRY] PROJECTILE SUCCESS at={projectile.Position}");
+
+            // Existing feedback handles a null enemy by using the Player position.
+            ParrySucceeded?.Invoke(null);
+            return true;
+        }
+
+        private bool TryParryProjectileInRange()
+        {
+            Vector2 hitPosition = (Vector2)transform.position +
+                                  GetParryDirection() * forwardOffset;
+            int count = Physics2D.OverlapCircleNonAlloc(
+                hitPosition,
+                radius,
+                projectileParryHits,
+                enemyLayer);
+            return TryParryProjectiles(projectileParryHits, count);
+        }
+
+        private bool TryParryProjectiles(Collider2D[] hits, int count)
+        {
+            if (hits == null || count <= 0)
+                return false;
+
+            int safeCount = Mathf.Min(count, hits.Length);
+            for (int i = 0; i < safeCount; i++)
+            {
+                Collider2D hit = hits[i];
+                if (hit == null)
+                    continue;
+
+                IParryableProjectile projectile =
+                    hit.GetComponent<IParryableProjectile>() ??
+                    hit.GetComponentInParent<IParryableProjectile>();
+                if (projectile != null && TryParryProjectile(projectile))
+                    return true;
+            }
+
+            return false;
+        }
+
+        private Vector2 GetParryDirection()
+        {
+            return controller != null && controller.FacingLeft
+                ? Vector2.left
+                : Vector2.right;
         }
 
         private void TryApplyDaggerStun(Game.Enemies.EnemyBase enemy)
