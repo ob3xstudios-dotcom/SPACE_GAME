@@ -588,6 +588,7 @@ namespace Game.Player
 
         private void OnWallJumped(int jumpedWallSide)
         {
+            gameplayNoiseEmitter?.EmitWallJump(transform.position);
             PositionAtWallSide(wallJumpBurst, jumpedWallSide, 0.05f);
             if (wallJumpBurst != null)
                 wallJumpBurst.Play();
@@ -611,6 +612,8 @@ namespace Game.Player
 
             if (hardLanding && !landingRollStarted)
                 gameplayNoiseEmitter?.EmitHardLanding(transform.position);
+            else if (downSpeed >= minLandingSpeed)
+                gameplayNoiseEmitter?.EmitLanding(transform.position);
             if (string.IsNullOrEmpty(eventId)) return;
 
             PositionAtFeet(landBurst);
@@ -622,6 +625,7 @@ namespace Game.Player
 
         private void OnNormalJumpPerformed()
         {
+            gameplayNoiseEmitter?.EmitJump(transform.position);
             AudioService.PlayAt(JumpEventId, transform.position);
         }
 

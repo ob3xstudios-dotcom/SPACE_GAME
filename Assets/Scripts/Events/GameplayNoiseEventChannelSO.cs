@@ -24,15 +24,32 @@ namespace Game.Events
             float intensity,
             GameplayNoiseAction action,
             GameObject emitter)
+            : this(position, intensity, 0f, 0f, action, emitter)
+        {
+        }
+
+        public GameplayNoiseEvent(
+            Vector2 position,
+            float intensity,
+            float radius,
+            float duration,
+            GameplayNoiseAction action,
+            GameObject emitter)
         {
             Position = position;
             Intensity = Mathf.Clamp01(intensity);
+            Radius = Mathf.Max(0f, radius);
+            Duration = Mathf.Max(0f, duration);
             Action = action;
             Emitter = emitter;
         }
 
         public Vector2 Position { get; }
         public float Intensity { get; }
+        /// <summary>Maximum world-space propagation radius of this emission.</summary>
+        public float Radius { get; }
+        /// <summary>Useful lifetime for presentation or stimulus memory.</summary>
+        public float Duration { get; }
         public GameplayNoiseAction Action { get; }
         public GameObject Emitter { get; }
     }
@@ -65,6 +82,17 @@ namespace Game.Events
             GameplayNoiseAction action,
             GameObject emitter)
         {
+            Raise(position, intensity, 0f, 0f, action, emitter);
+        }
+
+        public void Raise(
+            Vector2 position,
+            float intensity,
+            float radius,
+            float duration,
+            GameplayNoiseAction action,
+            GameObject emitter)
+        {
             if (emitter == null)
                 return;
 
@@ -76,6 +104,8 @@ namespace Game.Events
                 new GameplayNoiseEvent(
                     position,
                     normalizedIntensity,
+                    radius,
+                    duration,
                     action,
                     emitter));
         }

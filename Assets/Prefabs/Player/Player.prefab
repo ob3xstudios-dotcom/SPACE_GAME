@@ -28,6 +28,7 @@ GameObject:
   - component: {fileID: 1097569777515970473}
   - component: {fileID: 6723490123456789012}
   - component: {fileID: 930000000000000001}
+  - component: {fileID: 930000000000000002}
   - component: {fileID: 3196452078164205739}
   - component: {fileID: 4486341029457206118}
   - component: {fileID: 7463829102847561930}
@@ -717,15 +718,58 @@ MonoBehaviour:
   m_EditorClassIdentifier:
   noiseChannel: {fileID: 11400000, guid: d4f47ed7d05044a19d410124e63e6e06, type: 2}
   stealthFootstepIntensity: 0
+  stealthFootstepRadius: 1.25
   walkFootstepIntensity: 0.25
+  walkFootstepRadius: 3
   runFootstepIntensity: 0.55
+  runFootstepRadius: 6
+  footstepDuration: 0.35
+  jumpIntensity: 0
+  jumpRadius: 3.5
+  wallJumpIntensity: 0.45
+  wallJumpRadius: 4
+  jumpDuration: 0.4
+  landingIntensity: 0
+  landingRadius: 3
   hardLandingIntensity: 1
+  hardLandingRadius: 8
+  landingDuration: 0.45
   dashIntensity: 0.85
+  dashRadius: 7
   slideIntensity: 0.8
+  slideRadius: 6
   diveIntensity: 1
+  diveRadius: 8
+  fastMovementDuration: 0.5
   attackImpactIntensity: 0.75
+  attackImpactRadius: 6
   parryIntensity: 0.9
+  parryRadius: 7
+  combatDuration: 0.55
   controller: {fileID: 2901667793802344536}
+--- !u!114 &930000000000000002
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 933070315492324510}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 6c7e4a4b5e0f4d40a59df851b5318a72, type: 3}
+  m_Name:
+  m_EditorClassIdentifier:
+  noiseChannel: {fileID: 11400000, guid: d4f47ed7d05044a19d410124e63e6e06, type: 2}
+  circleColor: {r: 0.78, g: 0.92, b: 1, a: 0.2}
+  lineWidth: 0.02
+  segments: 64
+  sortingLayerName: Characters
+  sortingOrder: -1
+  durationMultiplier: 1
+  minimumVisibleDuration: 0.2
+  expandWave: 1
+  initialRadiusFraction: 0.08
+  circlePoolSize: 6
 --- !u!114 &3196452078164205739
 MonoBehaviour:
   m_ObjectHideFlags: 0
