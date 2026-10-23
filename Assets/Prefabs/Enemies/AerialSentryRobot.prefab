@@ -185,24 +185,38 @@ MonoBehaviour:
   patrolSpeed: 2
   waitAtEnds: 1
   endWaitDuration: 0.35
-  chaseSpeed: 4
-  chaseAcceleration: 12
+  chaseSpeed: 7
+  chaseAcceleration: 32
+  chaseDeceleration: 38
+  chaseTurnAcceleration: 48
   hoverHeight: 2.5
   horizontalDeadZone: 0.4
   verticalDeadZone: 0.35
-  maxHorizontalChaseSpeed: 4.5
-  maxVerticalChaseSpeed: 3.5
+  maxHorizontalChaseSpeed: 9.5
+  maxVerticalChaseSpeed: 7
   minimumGroundClearance: 1.25
   lostTargetTime: 4
   searchSweepStartDelay: 0.35
   searchArrivalRadius: 0.4
   searchSweepSpeed: 150
   returnSpeed: 3
+  navigationWorldMask:
+    serializedVersion: 2
+    m_Bits: 10312
+  navigationSkin: 0.05
+  blockedPursuitTimeout: 0.9
+  blockedSearchTimeout: 0.6
+  returnBlockedRetryDuration: 0.75
+  returnBlockedTimeout: 3
+  breadcrumbSpacing: 0.2
+  blockedReacquireDelay: 1.25
   hearingHorizontalRange: 3
   hearingVerticalRange: 3.5
   hearingMovementSpeedThreshold: 0.5
   muzzle: {fileID: 1041}
   projectilePrefab: {fileID: 2005, guid: a93b0b1a7a6a4d58b4d405a1e116c007, type: 3}
+  effectiveFireRange: 5.5
+  projectilePathRadius: 0.12
   chargeDuration: 0.45
   projectileSpeed: 7
   attackCooldown: 1.5
