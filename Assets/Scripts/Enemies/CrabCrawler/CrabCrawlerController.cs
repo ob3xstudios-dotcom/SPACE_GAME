@@ -48,6 +48,11 @@ namespace Game.Enemies.CrabCrawler
         [SerializeField, Min(0.1f)] private float detectionRange = 2.25f;
         [SerializeField, Min(0.1f)] private float detectionVerticalTolerance = 1.1f;
 
+        [Header("Shared Perception Pilot")]
+        [Tooltip("OFF preserves the original Crab detection exactly. Enable deliberately to test EnemyPerception2D.")]
+        [SerializeField] private bool useSharedPerception;
+        [SerializeField] private EnemyPerception2D sharedPerception;
+
         [Header("Short Attack")]
         [SerializeField, Min(0f)] private float windupDuration = 0.18f;
         [SerializeField, Min(0.05f)] private float lungeDistance = 0.7f;
@@ -114,6 +119,8 @@ namespace Game.Enemies.CrabCrawler
                 visualBaseScale = visualRoot.localScale;
 
             SetFacing(patrolDirection);
+            if (sharedPerception != null)
+                sharedPerception.enabled = useSharedPerception;
             ResolvePlayer();
         }
 
@@ -342,8 +349,14 @@ namespace Game.Enemies.CrabCrawler
 
             Vector2 origin = bodyCollider.bounds.center;
             Vector2 delta = playerCenter - origin;
-            if (delta.sqrMagnitude > detectionRange * detectionRange ||
-                Mathf.Abs(delta.y) > detectionVerticalTolerance)
+            bool perceivedBySharedSystem = useSharedPerception &&
+                                           sharedPerception != null &&
+                                           sharedPerception.isActiveAndEnabled &&
+                                           (sharedPerception.IsPlayerVisible ||
+                                            sharedPerception.HasActiveNoiseStimulus);
+            bool detectedByLegacySystem = delta.sqrMagnitude <= detectionRange * detectionRange &&
+                                          Mathf.Abs(delta.y) <= detectionVerticalTolerance;
+            if (useSharedPerception ? !perceivedBySharedSystem : !detectedByLegacySystem)
             {
                 ClearBlockedAttackTarget();
                 return false;
@@ -551,6 +564,8 @@ namespace Game.Enemies.CrabCrawler
                 return;
 
             FacingDirection = direction < 0 ? -1 : 1;
+            if (sharedPerception != null)
+                sharedPerception.SetFacingDirection(Vector2.right * FacingDirection);
             if (visualRoot == null)
                 return;
 

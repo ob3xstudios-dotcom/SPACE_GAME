@@ -35,6 +35,11 @@ namespace Game.Enemies.CavePlant
         [SerializeField] private LayerMask worldMask = 10312;
         [SerializeField] private LayerMask playerMask = 512;
 
+        [Header("Shared Perception Pilot")]
+        [SerializeField] private bool useSharedPerception;
+        [SerializeField] private EnemyPerception2D sharedPerception;
+        [SerializeField] private Vector2 perceptionFacingDirection = Vector2.right;
+
         [Header("Attack")]
         [SerializeField, Min(0f)] private float telegraphDuration = 0.65f;
         [SerializeField, Min(0f)] private float fireCooldown = 1.8f;
@@ -74,6 +79,13 @@ namespace Game.Enemies.CavePlant
                 muzzle = transform.Find("Muzzle");
             if (prototypeVisual == null)
                 prototypeVisual = GetComponent<CavePlantPrototypeVisual>();
+            if (sharedPerception == null)
+                sharedPerception = GetComponent<EnemyPerception2D>();
+            if (sharedPerception != null)
+            {
+                sharedPerception.SetFacingDirection(perceptionFacingDirection);
+                sharedPerception.enabled = useSharedPerception;
+            }
 
             TransitionTo(CavePlantState.Idle);
         }
@@ -147,6 +159,9 @@ namespace Game.Enemies.CavePlant
 
         private bool TryAcquireTarget(out Vector2 targetPosition)
         {
+            if (useSharedPerception)
+                return TryAcquireSharedPerceptionTarget(out targetPosition);
+
             targetPosition = default;
             int count = Physics2D.OverlapCircleNonAlloc(
                 transform.position,
@@ -175,6 +190,30 @@ namespace Game.Enemies.CavePlant
             }
 
             return found;
+        }
+
+        private bool TryAcquireSharedPerceptionTarget(out Vector2 targetPosition)
+        {
+            targetPosition = default;
+            if (sharedPerception == null || !sharedPerception.isActiveAndEnabled ||
+                (!sharedPerception.IsPlayerVisible && !sharedPerception.HasActiveNoiseStimulus))
+            {
+                return false;
+            }
+
+            Transform perceivedTarget = sharedPerception.Target;
+            if (perceivedTarget == null)
+                return false;
+            PlayerHealth perceivedHealth = perceivedTarget.GetComponent<PlayerHealth>() ??
+                                           perceivedTarget.GetComponentInChildren<PlayerHealth>();
+            if (perceivedHealth == null)
+                return false;
+
+            targetPosition = sharedPerception.TargetPoint;
+            if (((Vector2)transform.position - targetPosition).sqrMagnitude > detectionRange * detectionRange)
+                return false;
+
+            return HasClearShot(targetPosition);
         }
 
         private void FireRecordedShot()
@@ -278,7 +317,11 @@ namespace Game.Enemies.CavePlant
         {
             Vector2 direction = targetPosition - MuzzlePosition;
             if (direction.sqrMagnitude > 0.0001f)
+            {
                 aimDirection = direction.normalized;
+                if (useSharedPerception && sharedPerception != null)
+                    sharedPerception.SetFacingDirection(aimDirection);
+            }
         }
 
         private void TransitionTo(CavePlantState nextState)
@@ -308,6 +351,8 @@ namespace Game.Enemies.CavePlant
             projectileSpeed = Mathf.Max(0.1f, projectileSpeed);
             projectileDamage = Mathf.Max(1, projectileDamage);
             projectileLifetime = Mathf.Max(0.1f, projectileLifetime);
+            if (perceptionFacingDirection.sqrMagnitude < 0.0001f)
+                perceptionFacingDirection = Vector2.right;
         }
 
 #if UNITY_EDITOR
