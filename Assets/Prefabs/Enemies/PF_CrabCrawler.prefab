@@ -177,6 +177,7 @@ MonoBehaviour:
   recoveryDuration: 0.65
   contactDamage: 1
   contactDamageInterval: 0.75
+  downAttackContactGraceDuration: 0.12
   debugGizmos: 1
 --- !u!1 &11001
 GameObject:

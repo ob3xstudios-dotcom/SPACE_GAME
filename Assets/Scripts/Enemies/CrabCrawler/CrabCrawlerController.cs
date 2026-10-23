@@ -20,7 +20,7 @@ namespace Game.Enemies.CrabCrawler
     [RequireComponent(typeof(Rigidbody2D))]
     [RequireComponent(typeof(BoxCollider2D))]
     [RequireComponent(typeof(Health))]
-    public sealed class CrabCrawlerController : MonoBehaviour
+    public sealed class CrabCrawlerController : MonoBehaviour, IPlayerDownAttackContactSuppressor
     {
         private const float BlockedAttackTargetHysteresis = 0.15f;
 
@@ -59,6 +59,8 @@ namespace Game.Enemies.CrabCrawler
         [Header("Contact Damage")]
         [SerializeField, Min(1)] private int contactDamage = 1;
         [SerializeField, Min(0.05f)] private float contactDamageInterval = 0.75f;
+        [Tooltip("Contact grace granted only after this Crab takes a confirmed downward attack.")]
+        [SerializeField, Min(0f)] private float downAttackContactGraceDuration = 0.12f;
 
         [Header("Debug")]
         [SerializeField] private bool debugGizmos = true;
@@ -72,6 +74,9 @@ namespace Game.Enemies.CrabCrawler
         private float turnPauseTimer;
         private float lungeStartX;
         private float nextContactDamageTime;
+        private float suppressContactDamageUntil;
+        private int lastSuppressedDownAttackId;
+        private PlayerHealth pendingContactDamage;
         private int patrolDirection = 1;
         private int lungeDirection = 1;
         private int blockedAttackDirection;
@@ -134,6 +139,11 @@ namespace Game.Enemies.CrabCrawler
                     UpdateRecovery();
                     break;
             }
+        }
+
+        private void LateUpdate()
+        {
+            ResolvePendingContactDamage();
         }
 
         private void UpdatePatrol()
@@ -470,15 +480,15 @@ namespace Game.Enemies.CrabCrawler
 
         private void OnCollisionEnter2D(Collision2D collision)
         {
-            TryApplyContactDamage(collision != null ? collision.collider : null);
+            QueueContactDamage(collision != null ? collision.collider : null);
         }
 
         private void OnCollisionStay2D(Collision2D collision)
         {
-            TryApplyContactDamage(collision != null ? collision.collider : null);
+            QueueContactDamage(collision != null ? collision.collider : null);
         }
 
-        private void TryApplyContactDamage(Collider2D other)
+        private void QueueContactDamage(Collider2D other)
         {
             if (other == null || !IsLayerAllowed(other.gameObject.layer))
                 return;
@@ -486,8 +496,21 @@ namespace Game.Enemies.CrabCrawler
             PlayerHealth target =
                 other.GetComponent<PlayerHealth>() ??
                 other.GetComponentInParent<PlayerHealth>();
-            if (target == null || Time.time < nextContactDamageTime)
+            if (target != null && target.isActiveAndEnabled)
+                pendingContactDamage = target;
+        }
+
+        private void ResolvePendingContactDamage()
+        {
+            PlayerHealth target = pendingContactDamage;
+            pendingContactDamage = null;
+            if (target == null ||
+                !target.isActiveAndEnabled ||
+                Time.time < suppressContactDamageUntil ||
+                Time.time < nextContactDamageTime)
+            {
                 return;
+            }
 
             // Set the gate before applying damage so simultaneous callbacks from
             // multiple Player colliders cannot produce duplicate hits.
@@ -495,6 +518,18 @@ namespace Game.Enemies.CrabCrawler
             bool applied = target.TryTakeDamage(contactDamage, body.position, 0f);
             if (applied && CurrentState == CrabCrawlerState.Lunging)
                 BeginRecovery();
+        }
+
+        public void SuppressContactDamageForDownAttack(int attackId)
+        {
+            if (attackId <= 0 || attackId == lastSuppressedDownAttackId)
+                return;
+
+            lastSuppressedDownAttackId = attackId;
+            suppressContactDamageUntil = Mathf.Max(
+                suppressContactDamageUntil,
+                Time.time + downAttackContactGraceDuration);
+            pendingContactDamage = null;
         }
 
         private bool IsLayerAllowed(int layer)
@@ -546,6 +581,7 @@ namespace Game.Enemies.CrabCrawler
             groundProbeDistance = Mathf.Max(0.02f, groundProbeDistance);
             groundProbeForwardOffset = Mathf.Max(0f, groundProbeForwardOffset);
             obstacleProbeDistance = Mathf.Max(0.02f, obstacleProbeDistance);
+            downAttackContactGraceDuration = Mathf.Max(0f, downAttackContactGraceDuration);
             detectionRange = Mathf.Max(0.1f, detectionRange);
             detectionVerticalTolerance = Mathf.Max(0.1f, detectionVerticalTolerance);
             windupDuration = Mathf.Max(0f, windupDuration);

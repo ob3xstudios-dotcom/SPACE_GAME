@@ -1989,6 +1989,7 @@ namespace Game.Player
                         (resolution == Game.Combat.PlayerAttackResolution.Damage ||
                          resolution == Game.Combat.PlayerAttackResolution.BellyUp))
                     {
+                        SuppressDownAttackContactDamage(hitCol);
                         lastAttackAllowsDownBounce = true;
                         bool resolvedBellyUp =
                             resolution == Game.Combat.PlayerAttackResolution.BellyUp;
@@ -2064,6 +2065,7 @@ namespace Game.Player
                     if (hitEnemy &&
                         attackDirection == Game.Combat.PlayerAttackDirection.Down)
                     {
+                        SuppressDownAttackContactDamage(hitCol);
                         lastAttackAllowsDownBounce = true;
                         if (wasCurrentSupport)
                             ReleaseCurrentStandableSupport(false);
@@ -2095,6 +2097,7 @@ namespace Game.Player
                         hitCol.bounds.center);
                     if (attackDirection == Game.Combat.PlayerAttackDirection.Down)
                     {
+                        SuppressDownAttackContactDamage(hitCol);
                         lastAttackAllowsDownBounce = true;
                         if (wasCurrentSupport)
                             ReleaseCurrentStandableSupport(false);
@@ -2103,6 +2106,17 @@ namespace Game.Player
             }
 
             return didHit;
+        }
+
+        private void SuppressDownAttackContactDamage(Collider2D hitCollider)
+        {
+            if (hitCollider == null)
+                return;
+
+            Game.Combat.IPlayerDownAttackContactSuppressor suppressor =
+                hitCollider.GetComponent<Game.Combat.IPlayerDownAttackContactSuppressor>() ??
+                hitCollider.GetComponentInParent<Game.Combat.IPlayerDownAttackContactSuppressor>();
+            suppressor?.SuppressContactDamageForDownAttack(attackSequenceId);
         }
 
         private int ResolveDownHitPlayerSeparationDirection(

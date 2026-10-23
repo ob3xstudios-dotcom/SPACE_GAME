@@ -58,6 +58,15 @@ namespace Game.Combat
         PlayerAttackResolution ReceivePlayerAttack(PlayerAttackContext context);
     }
 
+    /// <summary>
+    /// Optional contact-damage gate for an enemy that was actually damaged by a
+    /// downward player attack. This is deliberately scoped to the struck enemy.
+    /// </summary>
+    public interface IPlayerDownAttackContactSuppressor
+    {
+        void SuppressContactDamageForDownAttack(int attackId);
+    }
+
     public interface IDamageable
     {
         void TakeDamage(int damage, Vector2 sourcePosition);

@@ -29,7 +29,7 @@ namespace Game.Enemies.CaveBat
     [RequireComponent(typeof(Rigidbody2D))]
     [RequireComponent(typeof(CircleCollider2D))]
     [RequireComponent(typeof(Health))]
-    public sealed class CaveBatController : MonoBehaviour
+    public sealed class CaveBatController : MonoBehaviour, IPlayerDownAttackContactSuppressor
     {
         private const int QueryCapacity = 24;
         private const int MinimumCurveSamples = 10;
@@ -122,6 +122,7 @@ namespace Game.Enemies.CaveBat
         private Vector2 movementDirection = Vector2.right;
         private float suppressContactDamageUntil;
         private bool suppressContactDamageUntilSeparation;
+        private int lastSuppressedDownAttackId;
 
         public CaveBatState CurrentState { get; private set; } = CaveBatState.Patrol;
         public bool HasRecordedNoise => hasRecordedNoise;
@@ -1181,6 +1182,19 @@ namespace Game.Enemies.CaveBat
                     BeginRecovery(false);
                     break;
             }
+        }
+
+        public void SuppressContactDamageForDownAttack(int attackId)
+        {
+            if (attackId <= 0 || attackId == lastSuppressedDownAttackId)
+                return;
+
+            lastSuppressedDownAttackId = attackId;
+            suppressContactDamageUntilSeparation = activePlayerContacts.Count > 0;
+            suppressContactDamageUntil = Mathf.Max(
+                suppressContactDamageUntil,
+                Time.time + playerHitContactGraceDuration);
+            pendingContactDamage.Clear();
         }
 
         private void HandleDied(Health deadHealth)
