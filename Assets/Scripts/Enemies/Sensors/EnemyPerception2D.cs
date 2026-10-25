@@ -92,6 +92,16 @@ namespace Game.Enemies
         public Vector2 FacingDirection => facingDirection;
         public float VisionDistance => visionDistance;
         public float VisionAngle => visionAngle;
+        public float AcquisitionTime => acquisitionTime;
+        public float LostSightGrace => lostSightGrace;
+
+        public bool IsPathOccluded(Vector2 targetPoint)
+        {
+            Vector2 offset = targetPoint - Origin;
+            float distance = offset.magnitude;
+            return distance > 0.0001f &&
+                   TryGetNearestObstacle(Origin, offset / distance, distance, out _);
+        }
 
         private void Awake()
         {

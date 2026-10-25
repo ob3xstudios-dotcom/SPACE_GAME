@@ -18,6 +18,7 @@ GameObject:
   - component: {fileID: -339758567872225978}
   - component: {fileID: -7115511746415363782}
   - component: {fileID: 7193154383821858081}
+  - component: {fileID: 7193154383821858082}
   m_Layer: 8
   m_Name: Enemy_Melee
   m_TagString: Untagged
@@ -261,6 +262,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   player: {fileID: 0}
   playerTag: Player
+  perception: {fileID: 7193154383821858082}
   viewDistance: 6
   loseDistanceMultiplier: 1.25
   memoryTime: 0.25
@@ -272,3 +274,39 @@ MonoBehaviour:
     m_Bits: 72
   attackRange: 1.1
   debugGizmos: 1
+--- !u!114 &7193154383821858082
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1319410354996920969}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: b4bf418e94784d79918d1c8016e4f9d2, type: 3}
+  m_Name:
+  m_EditorClassIdentifier:
+  target: {fileID: 0}
+  targetTag: Player
+  targetMask:
+    serializedVersion: 2
+    m_Bits: 512
+  visionEnabled: 1
+  visionOrigin: {fileID: 153668179440713136}
+  visionDistance: 6
+  visionAngle: 120
+  obstacleMask:
+    serializedVersion: 2
+    m_Bits: 72
+  acquisitionTime: 0
+  lostSightGrace: 0.25
+  hearingEnabled: 1
+  noiseChannel: {fileID: 11400000, guid: d4f47ed7d05044a19d410124e63e6e06, type: 2}
+  maximumHearingDistance: 5
+  hearingSensitivity: 1
+  showConeDuringPlayerStealth: 1
+  visualRayCount: 32
+  coneColor: {r: 1, g: 0.72, b: 0.12, a: 0.16}
+  coneSortingLayer: Characters
+  coneSortingOrder: -2
+  drawSceneGizmos: 1

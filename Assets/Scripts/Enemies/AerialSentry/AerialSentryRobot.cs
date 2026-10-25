@@ -105,11 +105,6 @@ namespace Game.Enemies.AerialSentry
         [SerializeField, Min(0.05f)] private float breadcrumbSpacing = 0.2f;
         [SerializeField, Min(0f)] private float blockedReacquireDelay = 1.25f;
 
-        [Header("Hearing")]
-        [SerializeField, Min(0f)] private float hearingHorizontalRange = 3f;
-        [SerializeField, Min(0f)] private float hearingVerticalRange = 3.5f;
-        [SerializeField, Min(0f)] private float hearingMovementSpeedThreshold = 0.5f;
-
         [Header("Attack")]
         [SerializeField] private Transform muzzle;
         [SerializeField] private AerialSentryProjectile projectilePrefab;
@@ -164,7 +159,6 @@ namespace Game.Enemies.AerialSentry
         private AerialSentrySearchPhase searchPhase = AerialSentrySearchPhase.ApproachLastKnown;
         private PlayerStandableSurface standableSurface;
         private Game.Player.PlayerController cachedPlayerController;
-        private Rigidbody2D cachedPlayerBody;
         private Game.Player.StealthDebugIndicator cachedStealthDebugIndicator;
         private Health health;
         private PlayerAttackContext pendingPlayerAttack;
@@ -1615,23 +1609,11 @@ namespace Game.Enemies.AerialSentry
         private bool TryHearPlayer(out Vector2 heardPosition)
         {
             heardPosition = default;
-            ResolvePlayerRuntimeComponents();
-            if (cachedPlayerController == null || cachedPlayerBody == null)
+            EnemyPerception2D perception = vision != null ? vision.Perception : null;
+            if (perception == null || !perception.HasActiveNoiseStimulus)
                 return false;
-            if (cachedPlayerController.IsSilentForEnemyHearing)
-                return false;
-            if (cachedPlayerBody.velocity.magnitude < hearingMovementSpeedThreshold)
-                return false;
-
-            heardPosition = cachedPlayerBody.worldCenterOfMass;
-            Vector2 offset = heardPosition - vision.Origin;
-            if (Mathf.Abs(offset.x) > hearingHorizontalRange ||
-                Mathf.Abs(offset.y) > hearingVerticalRange)
-            {
-                return false;
-            }
-
-            return !vision.IsPathOccluded(heardPosition);
+            heardPosition = perception.LastHeardPosition;
+            return true;
         }
 
         private void ReactToPlayerHearing(Vector2 heardPosition)
@@ -1672,14 +1654,6 @@ namespace Game.Enemies.AerialSentry
                     playerTransform.GetComponent<Game.Player.PlayerController>() ??
                     playerTransform.GetComponentInParent<Game.Player.PlayerController>() ??
                     playerTransform.GetComponentInChildren<Game.Player.PlayerController>(true);
-            }
-
-            if (cachedPlayerBody == null)
-            {
-                cachedPlayerBody =
-                    playerTransform.GetComponent<Rigidbody2D>() ??
-                    playerTransform.GetComponentInParent<Rigidbody2D>() ??
-                    playerTransform.GetComponentInChildren<Rigidbody2D>(true);
             }
 
             if (cachedStealthDebugIndicator == null)
@@ -1896,9 +1870,6 @@ namespace Game.Enemies.AerialSentry
                 returnBlockedTimeout);
             breadcrumbSpacing = Mathf.Max(0.05f, breadcrumbSpacing);
             blockedReacquireDelay = Mathf.Max(0f, blockedReacquireDelay);
-            hearingHorizontalRange = Mathf.Max(0f, hearingHorizontalRange);
-            hearingVerticalRange = Mathf.Max(0f, hearingVerticalRange);
-            hearingMovementSpeedThreshold = Mathf.Max(0f, hearingMovementSpeedThreshold);
             effectiveFireRange = Mathf.Max(0.1f, effectiveFireRange);
             projectilePathRadius = Mathf.Max(0.01f, projectilePathRadius);
             chargeDuration = Mathf.Max(0f, chargeDuration);

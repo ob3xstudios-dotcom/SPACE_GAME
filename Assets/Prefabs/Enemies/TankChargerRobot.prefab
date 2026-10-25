@@ -15,6 +15,7 @@ GameObject:
   - component: {fileID: 3006}
   - component: {fileID: 3007}
   - component: {fileID: 3008}
+  - component: {fileID: 3009}
   m_Layer: 8
   m_Name: TankChargerRobot
   m_TagString: Untagged
@@ -167,7 +168,7 @@ MonoBehaviour:
   m_EditorClassIdentifier:
   player: {fileID: 0}
   playerTag: Player
-  viewDistance: 7
+  perception: {fileID: 3009}
   loseDistanceMultiplier: 1.25
   playerLayer:
     serializedVersion: 2
@@ -176,8 +177,6 @@ MonoBehaviour:
     serializedVersion: 2
     m_Bits: 10312
   stealthViewDistanceMultiplier: 1
-  hearingDistance: 0.5
-  hearingSpeedThreshold: 0
   attackRangeX: 1.1
   attackRangeY: 0.8
   debugGizmos: 1
@@ -213,10 +212,6 @@ MonoBehaviour:
   wallProbeDistance: 0.18
   visionVerticalTolerance: 1.75
   visionMinimumHorizontalOffset: 0.35
-  enableRearHearing: 1
-  rearHearingRange: 2.5
-  rearHearingVerticalTolerance: 1.25
-  rearHearingMinimumHorizontalOffset: 0.35
   windupDuration: 0.65
   chargeSpeed: 11
   chargeAcceleration: 35
@@ -238,6 +233,38 @@ MonoBehaviour:
   bellyUpSeparationSafetyMargin: 0.6
   bellyUpSeparationTimeout: 0.75
   debugLogs: 0
+--- !u!114 &3009
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 3001}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: b4bf418e94784d79918d1c8016e4f9d2, type: 3}
+  m_Name:
+  m_EditorClassIdentifier:
+  target: {fileID: 0}
+  targetTag: Player
+  targetMask: {serializedVersion: 2, m_Bits: 512}
+  visionEnabled: 1
+  visionOrigin: {fileID: 3002}
+  visionDistance: 7
+  visionAngle: 100
+  obstacleMask: {serializedVersion: 2, m_Bits: 10312}
+  acquisitionTime: 0
+  lostSightGrace: 0.2
+  hearingEnabled: 1
+  noiseChannel: {fileID: 11400000, guid: d4f47ed7d05044a19d410124e63e6e06, type: 2}
+  maximumHearingDistance: 3
+  hearingSensitivity: 1
+  showConeDuringPlayerStealth: 1
+  visualRayCount: 32
+  coneColor: {r: 1, g: 0.72, b: 0.12, a: 0.16}
+  coneSortingLayer: Characters
+  coneSortingOrder: -2
+  drawSceneGizmos: 1
 --- !u!1 &3101
 GameObject:
   m_ObjectHideFlags: 0

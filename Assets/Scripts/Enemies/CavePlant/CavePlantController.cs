@@ -21,7 +21,6 @@ namespace Game.Enemies.CavePlant
     [DisallowMultipleComponent]
     public sealed class CavePlantController : MonoBehaviour
     {
-        private const int DetectionCapacity = 16;
         private const int WorldCastCapacity = 12;
 
         [Header("References")]
@@ -35,8 +34,7 @@ namespace Game.Enemies.CavePlant
         [SerializeField] private LayerMask worldMask = 10312;
         [SerializeField] private LayerMask playerMask = 512;
 
-        [Header("Shared Perception Pilot")]
-        [SerializeField] private bool useSharedPerception;
+        [Header("Perception")]
         [SerializeField] private EnemyPerception2D sharedPerception;
         [SerializeField] private Vector2 perceptionFacingDirection = Vector2.right;
 
@@ -51,7 +49,6 @@ namespace Game.Enemies.CavePlant
         [SerializeField] private bool debugLogs;
         [SerializeField] private bool drawGizmos = true;
 
-        private readonly Collider2D[] detectionHits = new Collider2D[DetectionCapacity];
         private readonly Collider2D[] muzzleOverlapHits = new Collider2D[WorldCastCapacity];
         private readonly RaycastHit2D[] worldCastHits = new RaycastHit2D[WorldCastCapacity];
         private Health health;
@@ -84,7 +81,7 @@ namespace Game.Enemies.CavePlant
             if (sharedPerception != null)
             {
                 sharedPerception.SetFacingDirection(perceptionFacingDirection);
-                sharedPerception.enabled = useSharedPerception;
+                sharedPerception.enabled = true;
             }
 
             TransitionTo(CavePlantState.Idle);
@@ -159,37 +156,7 @@ namespace Game.Enemies.CavePlant
 
         private bool TryAcquireTarget(out Vector2 targetPosition)
         {
-            if (useSharedPerception)
-                return TryAcquireSharedPerceptionTarget(out targetPosition);
-
-            targetPosition = default;
-            int count = Physics2D.OverlapCircleNonAlloc(
-                transform.position,
-                detectionRange,
-                detectionHits,
-                playerMask);
-
-            bool found = false;
-            float bestDistanceSq = float.PositiveInfinity;
-            for (int i = 0; i < count; i++)
-            {
-                Collider2D candidate = detectionHits[i];
-                if (candidate == null || !candidate.enabled)
-                    continue;
-                if (candidate.GetComponentInParent<PlayerHealth>() == null)
-                    continue;
-
-                Vector2 candidatePoint = candidate.bounds.center;
-                float distanceSq = (candidatePoint - MuzzlePosition).sqrMagnitude;
-                if (distanceSq >= bestDistanceSq || !HasClearShot(candidatePoint))
-                    continue;
-
-                bestDistanceSq = distanceSq;
-                targetPosition = candidatePoint;
-                found = true;
-            }
-
-            return found;
+            return TryAcquireSharedPerceptionTarget(out targetPosition);
         }
 
         private bool TryAcquireSharedPerceptionTarget(out Vector2 targetPosition)
@@ -319,7 +286,7 @@ namespace Game.Enemies.CavePlant
             if (direction.sqrMagnitude > 0.0001f)
             {
                 aimDirection = direction.normalized;
-                if (useSharedPerception && sharedPerception != null)
+                if (sharedPerception != null)
                     sharedPerception.SetFacingDirection(aimDirection);
             }
         }

@@ -45,12 +45,7 @@ namespace Game.Enemies.CrabCrawler
 
         [Header("Detection")]
         [SerializeField] private LayerMask playerMask = 1 << 9;
-        [SerializeField, Min(0.1f)] private float detectionRange = 2.25f;
-        [SerializeField, Min(0.1f)] private float detectionVerticalTolerance = 1.1f;
-
-        [Header("Shared Perception Pilot")]
-        [Tooltip("OFF preserves the original Crab detection exactly. Enable deliberately to test EnemyPerception2D.")]
-        [SerializeField] private bool useSharedPerception;
+        [Header("Perception")]
         [SerializeField] private EnemyPerception2D sharedPerception;
 
         [Header("Short Attack")]
@@ -120,7 +115,7 @@ namespace Game.Enemies.CrabCrawler
 
             SetFacing(patrolDirection);
             if (sharedPerception != null)
-                sharedPerception.enabled = useSharedPerception;
+                sharedPerception.enabled = true;
             ResolvePlayer();
         }
 
@@ -349,14 +344,11 @@ namespace Game.Enemies.CrabCrawler
 
             Vector2 origin = bodyCollider.bounds.center;
             Vector2 delta = playerCenter - origin;
-            bool perceivedBySharedSystem = useSharedPerception &&
-                                           sharedPerception != null &&
+            bool perceivedBySharedSystem = sharedPerception != null &&
                                            sharedPerception.isActiveAndEnabled &&
                                            (sharedPerception.IsPlayerVisible ||
                                             sharedPerception.HasActiveNoiseStimulus);
-            bool detectedByLegacySystem = delta.sqrMagnitude <= detectionRange * detectionRange &&
-                                          Mathf.Abs(delta.y) <= detectionVerticalTolerance;
-            if (useSharedPerception ? !perceivedBySharedSystem : !detectedByLegacySystem)
+            if (!perceivedBySharedSystem)
             {
                 ClearBlockedAttackTarget();
                 return false;
@@ -597,8 +589,6 @@ namespace Game.Enemies.CrabCrawler
             groundProbeForwardOffset = Mathf.Max(0f, groundProbeForwardOffset);
             obstacleProbeDistance = Mathf.Max(0.02f, obstacleProbeDistance);
             downAttackContactGraceDuration = Mathf.Max(0f, downAttackContactGraceDuration);
-            detectionRange = Mathf.Max(0.1f, detectionRange);
-            detectionVerticalTolerance = Mathf.Max(0.1f, detectionVerticalTolerance);
             windupDuration = Mathf.Max(0f, windupDuration);
             lungeDistance = Mathf.Max(0.05f, lungeDistance);
             lungeSpeed = Mathf.Max(0f, lungeSpeed);
@@ -625,9 +615,6 @@ namespace Game.Enemies.CrabCrawler
             Gizmos.DrawLine(new Vector3(left, y, 0f), new Vector3(right, y, 0f));
             Gizmos.DrawWireSphere(new Vector3(left, y, 0f), 0.1f);
             Gizmos.DrawWireSphere(new Vector3(right, y, 0f), 0.1f);
-
-            Gizmos.color = Color.yellow;
-            Gizmos.DrawWireSphere(transform.position, detectionRange);
 
             int direction = Application.isPlaying ? FacingDirection : 1;
             Bounds bounds = bodyCollider != null

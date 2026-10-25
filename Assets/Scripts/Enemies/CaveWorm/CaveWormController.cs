@@ -1,6 +1,5 @@
 using Game.Combat;
 using Game.Enemies.Combat;
-using Game.Events;
 using UnityEngine;
 
 namespace Game.Enemies.CaveWorm
@@ -28,7 +27,6 @@ namespace Game.Enemies.CaveWorm
     public sealed class CaveWormController : MonoBehaviour
     {
         [Header("References")]
-        [SerializeField] private GameplayNoiseEventChannelSO noiseChannel;
         [SerializeField] private Transform visualRoot;
         [SerializeField] private Collider2D exposedBodyCollider;
         [SerializeField] private EnemyAttackHitbox attackHitbox;
@@ -38,9 +36,8 @@ namespace Game.Enemies.CaveWorm
         [SerializeField] private CaveWormAttackDirection attackDirection =
             CaveWormAttackDirection.Up;
 
-        [Header("Hearing")]
-        [SerializeField, Min(0.1f)] private float hearingRadius = 8f;
-        [SerializeField, Range(0f, 2f)] private float noiseSensitivity = 1f;
+        [Header("Perception")]
+        [SerializeField] private EnemyPerception2D sharedPerception;
 
         [Header("Ambush Activation")]
         [SerializeField, Min(0.1f)] private float alertDuration = 4f;
@@ -69,6 +66,12 @@ namespace Game.Enemies.CaveWorm
         [Header("Debug")]
         [SerializeField] private bool debugGizmos = true;
 
+        [Header("Runtime Diagnostics (read only in Play Mode)")]
+        [SerializeField] private CaveWormState runtimeState;
+        [SerializeField] private bool runtimeSharedVisionStimulus;
+        [SerializeField] private bool runtimeSharedNoiseStimulus;
+        [SerializeField] private bool runtimeTargetInsideAmbushZone;
+
         private Health health;
         private Vector3 exposedLocalPosition;
         private Vector3 transitionStartLocalPosition;
@@ -77,6 +80,7 @@ namespace Game.Enemies.CaveWorm
         private float stateTimer;
         private bool impactFeedbackPlayed;
         private bool visualDefaultsCached;
+        private bool sharedNoiseConsumed;
 
         public CaveWormState CurrentState { get; private set; } = CaveWormState.Hidden;
         public CaveWormAttackDirection AttackDirection => attackDirection;
@@ -140,6 +144,7 @@ namespace Game.Enemies.CaveWorm
             CacheVisualDefaults();
             ApplyVisualOrientation();
             ConfigureAttackHitbox();
+            ConfigureSharedPerception();
             ResetToHidden();
         }
 
@@ -149,6 +154,7 @@ namespace Game.Enemies.CaveWorm
             CacheVisualDefaults();
             ApplyVisualOrientation();
             ConfigureAttackHitbox();
+            ConfigureSharedPerception();
             Subscribe();
             ResetToHidden();
         }
@@ -157,6 +163,9 @@ namespace Game.Enemies.CaveWorm
         {
             if (health != null && health.CurrentHP <= 0)
                 return;
+
+            UpdateSharedPerception();
+            UpdateRuntimeDiagnostics();
 
             switch (CurrentState)
             {
@@ -178,31 +187,6 @@ namespace Game.Enemies.CaveWorm
             }
         }
 
-        private void HandleNoise(GameplayNoiseEvent noiseEvent)
-        {
-            if (!isActiveAndEnabled || noiseEvent.Emitter == null)
-                return;
-            if (CurrentState != CaveWormState.Hidden && CurrentState != CaveWormState.Alert)
-                return;
-            if (!IsLayerAllowed(noiseEvent.Emitter.layer))
-                return;
-
-            float effectiveRadius = hearingRadius *
-                                    Mathf.Clamp01(noiseEvent.Intensity * noiseSensitivity);
-            if (effectiveRadius <= 0f ||
-                ((Vector2)transform.position - noiseEvent.Position).sqrMagnitude >
-                effectiveRadius * effectiveRadius)
-            {
-                return;
-            }
-
-            currentTarget = noiseEvent.Emitter.transform;
-            if (CurrentState == CaveWormState.Hidden)
-                BeginAlert();
-            else
-                stateTimer = 0f;
-        }
-
         private void BeginAlert()
         {
             DisableAttackHitbox();
@@ -210,6 +194,44 @@ namespace Game.Enemies.CaveWorm
             SetVisualPosition(HiddenLocalPosition);
             CurrentState = CaveWormState.Alert;
             stateTimer = 0f;
+        }
+
+        private void UpdateSharedPerception()
+        {
+            if (sharedPerception == null ||
+                !sharedPerception.isActiveAndEnabled)
+            {
+                sharedNoiseConsumed = false;
+                return;
+            }
+
+            bool noiseActive = sharedPerception.HasActiveNoiseStimulus;
+            bool newNoise = noiseActive && !sharedNoiseConsumed;
+            sharedNoiseConsumed = noiseActive;
+
+            if (CurrentState != CaveWormState.Hidden && CurrentState != CaveWormState.Alert)
+                return;
+            if (!sharedPerception.IsPlayerVisible && !newNoise)
+                return;
+
+            currentTarget = sharedPerception.Target;
+            if (currentTarget == null)
+                return;
+
+            if (CurrentState == CaveWormState.Hidden)
+                BeginAlert();
+            else if (newNoise)
+                stateTimer = 0f;
+        }
+
+        private void UpdateRuntimeDiagnostics()
+        {
+            runtimeState = CurrentState;
+            runtimeSharedVisionStimulus = sharedPerception != null &&
+                                          sharedPerception.IsPlayerVisible;
+            runtimeSharedNoiseStimulus = sharedPerception != null &&
+                                         sharedPerception.HasActiveNoiseStimulus;
+            runtimeTargetInsideAmbushZone = IsTargetWithinAmbushZone();
         }
 
         private void UpdateAlert()
@@ -390,8 +412,19 @@ namespace Game.Enemies.CaveWorm
                 attackHitbox = GetComponentInChildren<EnemyAttackHitbox>(true);
             if (prototypeVisual == null)
                 prototypeVisual = GetComponent<CaveWormPrototypeVisual>();
+            if (sharedPerception == null)
+                sharedPerception = GetComponent<EnemyPerception2D>();
             if (health == null)
                 health = GetComponent<Health>();
+        }
+
+        private void ConfigureSharedPerception()
+        {
+            if (sharedPerception == null)
+                return;
+
+            sharedPerception.SetFacingDirection(WorldAttackVector);
+            sharedPerception.enabled = true;
         }
 
         private void CacheVisualDefaults()
@@ -406,7 +439,6 @@ namespace Game.Enemies.CaveWorm
 
         private void Subscribe()
         {
-            noiseChannel?.Subscribe(HandleNoise);
             if (health != null)
             {
                 health.OnDied -= HandleDied;
@@ -416,7 +448,6 @@ namespace Game.Enemies.CaveWorm
 
         private void Unsubscribe()
         {
-            noiseChannel?.Unsubscribe(HandleNoise);
             if (health != null)
                 health.OnDied -= HandleDied;
         }
@@ -425,6 +456,8 @@ namespace Game.Enemies.CaveWorm
         {
             DisableAttackHitbox();
             SetBodyColliderEnabled(false);
+            if (sharedPerception != null)
+                sharedPerception.enabled = false;
             prototypeVisual?.ClearConfirmedImpact();
             Unsubscribe();
             currentTarget = null;
@@ -478,6 +511,8 @@ namespace Game.Enemies.CaveWorm
         private void OnDisable()
         {
             Unsubscribe();
+            if (sharedPerception != null)
+                sharedPerception.enabled = false;
             prototypeVisual?.ClearConfirmedImpact();
             ResetToHidden();
         }
@@ -490,8 +525,6 @@ namespace Game.Enemies.CaveWorm
 
         private void OnValidate()
         {
-            hearingRadius = Mathf.Max(0.1f, hearingRadius);
-            noiseSensitivity = Mathf.Clamp(noiseSensitivity, 0f, 2f);
             alertDuration = Mathf.Max(0.1f, alertDuration);
             activationZoneWidth = Mathf.Max(0.1f, activationZoneWidth);
             activationZoneDepth = Mathf.Max(0.1f, activationZoneDepth);
@@ -514,9 +547,6 @@ namespace Game.Enemies.CaveWorm
         {
             if (!debugGizmos)
                 return;
-
-            Gizmos.color = Color.yellow;
-            Gizmos.DrawWireSphere(transform.position, hearingRadius);
 
             Matrix4x4 previousMatrix = Gizmos.matrix;
             Gizmos.matrix = transform.localToWorldMatrix *

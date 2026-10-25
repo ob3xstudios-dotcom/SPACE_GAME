@@ -15,6 +15,7 @@ GameObject:
   - component: {fileID: 1005}
   - component: {fileID: 1007}
   - component: {fileID: 1008}
+  - component: {fileID: 1009}
   m_Layer: 8
   m_Name: AerialSentryRobot
   m_TagString: Untagged
@@ -156,15 +157,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: a93b0b1a7a6a4d58b4d405a1e116c003, type: 3}
   m_Name:
   m_EditorClassIdentifier:
-  eyeOrigin: {fileID: 1031}
-  visionRange: 7
-  visionAngle: 50
-  visionOcclusionMask:
-    serializedVersion: 2
-    m_Bits: 10312
-  playerMask:
-    serializedVersion: 2
-    m_Bits: 512
+  perception: {fileID: 1009}
   detectionAcquireTime: 0.15
   lostSightGrace: 0.15
   visionRotationSpeed: 360
@@ -210,9 +203,6 @@ MonoBehaviour:
   returnBlockedTimeout: 3
   breadcrumbSpacing: 0.2
   blockedReacquireDelay: 1.25
-  hearingHorizontalRange: 3
-  hearingVerticalRange: 3.5
-  hearingMovementSpeedThreshold: 0.5
   muzzle: {fileID: 1041}
   projectilePrefab: {fileID: 2005, guid: a93b0b1a7a6a4d58b4d405a1e116c007, type: 3}
   effectiveFireRange: 5.5
@@ -638,7 +628,6 @@ GameObject:
   - component: {fileID: 1021}
   - component: {fileID: 1022}
   - component: {fileID: 1023}
-  - component: {fileID: 1024}
   m_Layer: 8
   m_Name: VisionVisual
   m_TagString: Untagged
@@ -711,28 +700,6 @@ MeshRenderer:
   m_SortingLayer: 7
   m_SortingOrder: 0
   m_AdditionalVertexStreams: {fileID: 0}
---- !u!114 &1024
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 1020}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: a93b0b1a7a6a4d58b4d405a1e116c004, type: 3}
-  m_Name:
-  m_EditorClassIdentifier:
-  vision: {fileID: 1006}
-  owner: {fileID: 1005}
-  visionRayCount: 32
-  patrolColor: {r: 0.1, g: 0.75, b: 1, a: 0.16}
-  acquiringColor: {r: 1, g: 0.82, b: 0.15, a: 0.25}
-  chargingColor: {r: 1, g: 0.15, b: 0.08, a: 0.34}
-  cooldownColor: {r: 0.25, g: 0.55, b: 1, a: 0.13}
-  sortingLayerName: Characters
-  sortingOrder: 0
-  debugVisualLogs: 0
 --- !u!1 &1030
 GameObject:
   m_ObjectHideFlags: 0
@@ -764,6 +731,38 @@ Transform:
   m_Children: []
   m_Father: {fileID: 1002}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!114 &1009
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1001}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: b4bf418e94784d79918d1c8016e4f9d2, type: 3}
+  m_Name:
+  m_EditorClassIdentifier:
+  target: {fileID: 0}
+  targetTag: Player
+  targetMask: {serializedVersion: 2, m_Bits: 512}
+  visionEnabled: 1
+  visionOrigin: {fileID: 1031}
+  visionDistance: 7
+  visionAngle: 50
+  obstacleMask: {serializedVersion: 2, m_Bits: 10312}
+  acquisitionTime: 0
+  lostSightGrace: 0
+  hearingEnabled: 1
+  noiseChannel: {fileID: 11400000, guid: d4f47ed7d05044a19d410124e63e6e06, type: 2}
+  maximumHearingDistance: 4.6
+  hearingSensitivity: 1
+  showConeDuringPlayerStealth: 1
+  visualRayCount: 32
+  coneColor: {r: 0.1, g: 0.75, b: 1, a: 0.16}
+  coneSortingLayer: Characters
+  coneSortingOrder: 0
+  drawSceneGizmos: 1
 --- !u!1 &1040
 GameObject:
   m_ObjectHideFlags: 0

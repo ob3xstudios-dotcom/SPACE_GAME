@@ -14,6 +14,7 @@ GameObject:
   - component: {fileID: 30005}
   - component: {fileID: 30006}
   - component: {fileID: 30007}
+  - component: {fileID: 30008}
   m_Layer: 8
   m_Name: PF_CaveBat
   m_TagString: Untagged
@@ -139,7 +140,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: d9c3a4b587e14f20a6b8c1d2357e904f, type: 3}
   m_Name:
   m_EditorClassIdentifier:
-  noiseChannel: {fileID: 11400000, guid: d4f47ed7d05044a19d410124e63e6e06, type: 2}
+  perception: {fileID: 30008}
   body: {fileID: 30003}
   bodyCollider: {fileID: 30004}
   prototypeVisual: {fileID: 30007}
@@ -147,8 +148,6 @@ MonoBehaviour:
   patrolPointB: {x: 2, y: 0}
   patrolSpeed: 2
   patrolWaitDuration: 0.25
-  hearingRadius: 8
-  noiseSensitivity: 1
   reactionDelay: 0.35
   approachSpeed: 3.5
   uWidth: 3.2
@@ -171,6 +170,40 @@ MonoBehaviour:
   navigationSkin: 0.06
   pathValidationStep: 0.18
   debugGizmos: 1
+--- !u!114 &30008
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 30001}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: b4bf418e94784d79918d1c8016e4f9d2, type: 3}
+  m_Name:
+  m_EditorClassIdentifier:
+  target: {fileID: 0}
+  targetTag: Player
+  targetMask: {serializedVersion: 2, m_Bits: 512}
+  visionEnabled: 1
+  visionOrigin: {fileID: 30002}
+  visionDistance: 8
+  visionAngle: 100
+  obstacleMask: {serializedVersion: 2, m_Bits: 10312}
+  acquisitionTime: 0
+  lostSightGrace: 0.15
+  hearingEnabled: 1
+  noiseChannel: {fileID: 11400000, guid: d4f47ed7d05044a19d410124e63e6e06, type: 2}
+  maximumHearingDistance: 8
+  hearingSensitivity: 1
+  showConeDuringPlayerStealth: 1
+  visualRayCount: 32
+  coneColor: {r: 1, g: 0.72, b: 0.12, a: 0.16}
+  coneSortingLayer: Characters
+  coneSortingOrder: -2
+  drawSceneGizmos: 1
+  visionGizmoColor: {r: 1, g: 0.72, b: 0.12, a: 0.9}
+  hearingGizmoColor: {r: 0.85, g: 0.2, b: 1, a: 0.65}
 --- !u!114 &30007
 MonoBehaviour:
   m_ObjectHideFlags: 0

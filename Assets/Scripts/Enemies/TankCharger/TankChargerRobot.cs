@@ -65,12 +65,6 @@ namespace Game.Enemies.TankCharger
         [SerializeField, Min(0f)] private float visionVerticalTolerance = 1.75f;
         [SerializeField, Min(0f)] private float visionMinimumHorizontalOffset = 0.35f;
 
-        [Header("Hearing")]
-        [SerializeField] private bool enableRearHearing = true;
-        [SerializeField, Min(0f)] private float rearHearingRange = 2.5f;
-        [SerializeField, Min(0f)] private float rearHearingVerticalTolerance = 1.25f;
-        [SerializeField, Min(0f)] private float rearHearingMinimumHorizontalOffset = 0.35f;
-
         [Header("Charge")]
         [SerializeField, Min(0f)] private float windupDuration = 0.65f;
         [SerializeField, Min(0f)] private float chargeSpeed = 11f;
@@ -380,15 +374,7 @@ namespace Game.Enemies.TankCharger
                 return true;
             }
 
-            float rearDistance = -forwardDistance;
-            float feetDelta = Mathf.Abs(playerBounds.min.y - tankBounds.min.y);
-            if (enableRearHearing &&
-                rearDistance >= rearHearingMinimumHorizontalOffset &&
-                rearDistance <= rearHearingRange &&
-                feetDelta <= rearHearingVerticalTolerance &&
-                sensors.CanHearPlayer(
-                    body.position,
-                    rearHearingRange + rearHearingVerticalTolerance))
+            if (sensors.Perception != null && sensors.Perception.HasActiveNoiseStimulus)
             {
                 source = TankDetectionSource.Hearing;
                 return true;
@@ -982,9 +968,6 @@ namespace Game.Enemies.TankCharger
             wallProbeDistance = Mathf.Max(0.02f, wallProbeDistance);
             visionVerticalTolerance = Mathf.Max(0f, visionVerticalTolerance);
             visionMinimumHorizontalOffset = Mathf.Max(0f, visionMinimumHorizontalOffset);
-            rearHearingRange = Mathf.Max(0f, rearHearingRange);
-            rearHearingVerticalTolerance = Mathf.Max(0f, rearHearingVerticalTolerance);
-            rearHearingMinimumHorizontalOffset = Mathf.Max(0f, rearHearingMinimumHorizontalOffset);
             windupDuration = Mathf.Max(0f, windupDuration);
             chargeSpeed = Mathf.Max(0f, chargeSpeed);
             chargeAcceleration = Mathf.Max(0f, chargeAcceleration);
@@ -1139,17 +1122,6 @@ namespace Game.Enemies.TankCharger
                 Gizmos.color = Color.yellow;
                 Gizmos.DrawWireSphere(transform.position, detectionRange);
             }
-
-            Bounds tankDetectionBounds = bodyCollider != null
-                ? bodyCollider.bounds
-                : new Bounds(transform.position, new Vector3(1.8f, 1.1f, 0f));
-            int detectionDirection = Application.isPlaying ? facingDirection : 1;
-            Vector3 rearCenter = tankDetectionBounds.center +
-                                 Vector3.left * detectionDirection * rearHearingRange * 0.5f;
-            Gizmos.color = new Color(0.75f, 0.25f, 1f, 0.85f);
-            Gizmos.DrawWireCube(
-                rearCenter,
-                new Vector3(rearHearingRange, rearHearingVerticalTolerance * 2f, 0f));
 
             int direction = Application.isPlaying ? facingDirection : 1;
             Gizmos.color = Color.red;

@@ -1,6 +1,5 @@
 using System.Collections.Generic;
 using Game.Combat;
-using Game.Events;
 using Game.Player;
 using UnityEngine;
 
@@ -37,7 +36,7 @@ namespace Game.Enemies.CaveBat
         private const float ArrivalTolerance = 0.015f;
 
         [Header("References")]
-        [SerializeField] private GameplayNoiseEventChannelSO noiseChannel;
+        [SerializeField] private EnemyPerception2D perception;
         [SerializeField] private Rigidbody2D body;
         [SerializeField] private CircleCollider2D bodyCollider;
         [SerializeField] private CaveBatPrototypeVisual prototypeVisual;
@@ -48,9 +47,7 @@ namespace Game.Enemies.CaveBat
         [SerializeField, Min(0f)] private float patrolSpeed = 2f;
         [SerializeField, Min(0f)] private float patrolWaitDuration = 0.25f;
 
-        [Header("Hearing")]
-        [SerializeField, Min(0.1f)] private float hearingRadius = 8f;
-        [SerializeField, Range(0f, 2f)] private float noiseSensitivity = 1f;
+        [Header("Perception Reaction")]
         [SerializeField, Min(0f)] private float reactionDelay = 0.35f;
 
         [Header("Ambush Path")]
@@ -164,6 +161,8 @@ namespace Game.Enemies.CaveBat
             if (health != null && health.CurrentHP <= 0)
                 return;
 
+            ConsumePerception();
+
             switch (CurrentState)
             {
                 case CaveBatState.Patrol:
@@ -191,6 +190,9 @@ namespace Game.Enemies.CaveBat
                     UpdateReturn();
                     break;
             }
+
+            if (perception != null && movementDirection.sqrMagnitude > 0.0001f)
+                perception.SetFacingDirection(movementDirection);
         }
 
         private void LateUpdate()
@@ -301,9 +303,9 @@ namespace Game.Enemies.CaveBat
                    other.GetComponentInParent<PlayerHealth>();
         }
 
-        private void HandleNoise(GameplayNoiseEvent noiseEvent)
+        private void ConsumePerception()
         {
-            if (!isActiveAndEnabled)
+            if (perception == null || !perception.isActiveAndEnabled)
                 return;
 
             bool canStartManeuver = CurrentState == CaveBatState.Patrol;
@@ -313,12 +315,19 @@ namespace Game.Enemies.CaveBat
             if (!canStartManeuver && !canUpdateDiveTarget)
                 return;
 
-            if (!TryAcceptNoise(
-                    noiseEvent,
-                    out Vector2 heardPosition,
-                    out Vector2 attackTargetPosition,
-                    out Vector2 targetExtents))
+            bool heard = perception.HasActiveNoiseStimulus;
+            bool seen = perception.IsPlayerVisible;
+            if (!heard && !seen)
                 return;
+
+            Vector2 heardPosition = heard
+                ? perception.LastHeardPosition
+                : perception.LastSeenPosition;
+            ResolveAttackTargetSnapshot(
+                perception.Target != null ? perception.Target.gameObject : null,
+                heardPosition,
+                out Vector2 attackTargetPosition,
+                out Vector2 targetExtents);
 
             if (canUpdateDiveTarget)
             {
@@ -342,41 +351,6 @@ namespace Game.Enemies.CaveBat
             blockedTimer = 0f;
             movementDirection = Vector2.zero;
             CurrentState = CaveBatState.Alert;
-        }
-
-        private bool TryAcceptNoise(
-            GameplayNoiseEvent noiseEvent,
-            out Vector2 heardPosition,
-            out Vector2 attackTargetPosition,
-            out Vector2 targetExtents)
-        {
-            heardPosition = default;
-            attackTargetPosition = default;
-            targetExtents = default;
-            if (noiseEvent.Emitter == null || !noiseEvent.Emitter.activeInHierarchy)
-                return false;
-            if (!IsLayerAllowed(noiseEvent.Emitter.layer, playerMask))
-                return false;
-
-            float effectiveRadius = hearingRadius *
-                                    Mathf.Clamp01(noiseEvent.Intensity * noiseSensitivity);
-            if (effectiveRadius <= 0f)
-                return false;
-
-            Vector2 origin = body != null ? body.position : (Vector2)transform.position;
-            Vector2 toNoise = noiseEvent.Position - origin;
-            if (toNoise.sqrMagnitude > effectiveRadius * effectiveRadius)
-                return false;
-            if (IsAcousticallyOccluded(origin, noiseEvent.Position))
-                return false;
-
-            heardPosition = noiseEvent.Position;
-            ResolveAttackTargetSnapshot(
-                noiseEvent.Emitter,
-                heardPosition,
-                out attackTargetPosition,
-                out targetExtents);
-            return true;
         }
 
         private void ResolveAttackTargetSnapshot(
@@ -983,32 +957,6 @@ namespace Game.Enemies.CaveBat
             return true;
         }
 
-        private bool IsAcousticallyOccluded(Vector2 origin, Vector2 target)
-        {
-            Vector2 offset = target - origin;
-            float distance = offset.magnitude;
-            if (distance <= ArrivalTolerance || worldMask.value == 0)
-                return false;
-
-            int hitCount = Physics2D.RaycastNonAlloc(
-                origin,
-                offset / distance,
-                castHits,
-                distance,
-                worldMask);
-            float endpointTolerance = Mathf.Max(0.05f, navigationSkin);
-            for (int index = 0; index < hitCount; index++)
-            {
-                RaycastHit2D candidate = castHits[index];
-                if (!IsRelevantWorldCollider(candidate.collider))
-                    continue;
-                if (candidate.distance < distance - endpointTolerance)
-                    return true;
-            }
-
-            return false;
-        }
-
         private bool IsRelevantWorldCollider(Collider2D candidate)
         {
             if (candidate == null || candidate.isTrigger)
@@ -1129,13 +1077,14 @@ namespace Game.Enemies.CaveBat
                 bodyCollider = GetComponent<CircleCollider2D>();
             if (prototypeVisual == null)
                 prototypeVisual = GetComponent<CaveBatPrototypeVisual>();
+            if (perception == null)
+                perception = GetComponent<EnemyPerception2D>();
             if (health == null)
                 health = GetComponent<Health>();
         }
 
         private void Subscribe()
         {
-            noiseChannel?.Subscribe(HandleNoise);
             if (health != null)
             {
                 health.OnDamaged -= HandleDamaged;
@@ -1147,7 +1096,6 @@ namespace Game.Enemies.CaveBat
 
         private void Unsubscribe()
         {
-            noiseChannel?.Unsubscribe(HandleNoise);
             if (health != null)
             {
                 health.OnDamaged -= HandleDamaged;
@@ -1285,8 +1233,6 @@ namespace Game.Enemies.CaveBat
         {
             patrolSpeed = Mathf.Max(0f, patrolSpeed);
             patrolWaitDuration = Mathf.Max(0f, patrolWaitDuration);
-            hearingRadius = Mathf.Max(0.1f, hearingRadius);
-            noiseSensitivity = Mathf.Clamp(noiseSensitivity, 0f, 2f);
             reactionDelay = Mathf.Max(0f, reactionDelay);
             approachSpeed = Mathf.Max(0.1f, approachSpeed);
             uWidth = Mathf.Max(0.2f, uWidth);
@@ -1331,8 +1277,6 @@ namespace Game.Enemies.CaveBat
             Gizmos.DrawWireSphere(patrolB, 0.12f);
 
             Gizmos.color = Color.yellow;
-            Gizmos.DrawWireSphere(transform.position, hearingRadius);
-
             Gizmos.color = new Color(0.25f, 0.8f, 1f, 1f);
             Gizmos.DrawWireSphere(transform.position, GetBodyRadius() + navigationSkin);
 
