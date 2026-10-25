@@ -1,3 +1,4 @@
+using Game.Combat;
 using Game.Player;
 using UnityEngine;
 
@@ -12,13 +13,19 @@ namespace Game.World.Traps
         Embedded
     }
 
+    public enum LandingMode
+    {
+        RemainBreakable,
+        DestroyOnLanding
+    }
+
     /// <summary>
     /// One-shot proximity trap. It predicts a vertical interception from a configured
     /// reference walking speed, but never follows or moves horizontally toward the Player.
     /// </summary>
     [DisallowMultipleComponent]
     [RequireComponent(typeof(Rigidbody2D))]
-    public sealed class CaveStalactiteController : MonoBehaviour
+    public sealed class CaveStalactiteController : MonoBehaviour, IPlayerAttackReceiver
     {
         private const int CastCapacity = 16;
         private const int PlayerOverlapCapacity = 8;
@@ -30,6 +37,7 @@ namespace Game.World.Traps
         [Tooltip("Also defines the full body volume used by the downward safety casts.")]
         [SerializeField] private BoxCollider2D fallingDamageCollider;
         [SerializeField] private BoxCollider2D embeddedPlatformCollider;
+        [SerializeField] private BoxCollider2D embeddedAttackCollider;
         [SerializeField] private CaveStalactitePrototypeVisual prototypeVisual;
 
         [Header("Proximity")]
@@ -55,6 +63,10 @@ namespace Game.World.Traps
         [SerializeField, Range(0f, 1f)] private float minimumLandingNormalY = 0.35f;
         [SerializeField] private LayerMask worldMask = (1 << 3) | (1 << 6) | (1 << 13);
 
+        [Header("Landing")]
+        [SerializeField] private LandingMode landingMode = LandingMode.RemainBreakable;
+        [SerializeField, Min(1)] private int hitsToDestroy = 2;
+
         [Header("Debug")]
         [SerializeField] private bool debugGizmos = true;
         [SerializeField] private bool debugLogs = true;
@@ -71,6 +83,9 @@ namespace Game.World.Traps
         private bool landingPlanValid;
         private bool initialized;
         private bool invalidPlanReported;
+        private bool removalScheduled;
+        private int receivedHits;
+        private int lastReceivedAttackId = -1;
 
         public CaveStalactiteState CurrentState { get; private set; } =
             CaveStalactiteState.Armed;
@@ -96,6 +111,7 @@ namespace Game.World.Traps
             initialized = true;
             SetDamageActive(false);
             SetPlatformActive(false);
+            SetEmbeddedAttackActive(false);
             CurrentState = CaveStalactiteState.Armed;
             RefreshLandingPlan();
             NotifyVisualStateChanged();
@@ -116,9 +132,15 @@ namespace Game.World.Traps
 
             SetDamageActive(CurrentState == CaveStalactiteState.Falling);
             if (CurrentState == CaveStalactiteState.Embedded)
+            {
+                SetEmbeddedAttackActive(landingMode == LandingMode.RemainBreakable);
                 TryEnablePlatformWhenClear();
+            }
             else
+            {
                 SetPlatformActive(false);
+                SetEmbeddedAttackActive(false);
+            }
 
             NotifyVisualStateChanged();
         }
@@ -126,11 +148,15 @@ namespace Game.World.Traps
         private void OnDisable()
         {
             SetDamageActive(false);
+            SetEmbeddedAttackActive(false);
             trackedPlayerCollider = null;
         }
 
         private void FixedUpdate()
         {
+            if (removalScheduled)
+                return;
+
             switch (CurrentState)
             {
                 case CaveStalactiteState.Armed:
@@ -216,6 +242,7 @@ namespace Game.World.Traps
             stateTimer = 0f;
             trackedPlayerCollider = null;
             SetPlatformActive(false);
+            SetEmbeddedAttackActive(false);
             SetState(CaveStalactiteState.Falling);
             SetDamageActive(true);
         }
@@ -276,10 +303,41 @@ namespace Game.World.Traps
                 body.angularVelocity = 0f;
             }
 
+            if (landingMode == LandingMode.DestroyOnLanding)
+            {
+                SetPlatformActive(false);
+                SetEmbeddedAttackActive(false);
+                ScheduleRemoval();
+                return;
+            }
+
             stateTimer = 0f;
             SetState(CaveStalactiteState.Embedded);
+            SetEmbeddedAttackActive(true);
             prototypeVisual?.PlayImpact();
             TryEnablePlatformWhenClear();
+        }
+
+        public PlayerAttackResolution ReceivePlayerAttack(PlayerAttackContext context)
+        {
+            if (removalScheduled ||
+                landingMode != LandingMode.RemainBreakable ||
+                CurrentState != CaveStalactiteState.Embedded ||
+                context.AttackId <= 0 ||
+                context.Damage <= 0 ||
+                context.AttackId == lastReceivedAttackId)
+            {
+                return PlayerAttackResolution.None;
+            }
+
+            lastReceivedAttackId = context.AttackId;
+            receivedHits++;
+            prototypeVisual?.PlayImpact();
+
+            if (receivedHits >= hitsToDestroy)
+                ScheduleRemoval();
+
+            return PlayerAttackResolution.Damage;
         }
 
         private void TryEnablePlatformWhenClear()
@@ -464,6 +522,7 @@ namespace Game.World.Traps
             stateTimer = 0f;
             SetDamageActive(false);
             SetPlatformActive(false);
+            SetEmbeddedAttackActive(false);
             SetState(CaveStalactiteState.Armed);
         }
 
@@ -471,6 +530,7 @@ namespace Game.World.Traps
         {
             SetDamageActive(false);
             SetPlatformActive(false);
+            SetEmbeddedAttackActive(false);
             if (body != null)
             {
                 body.velocity = Vector2.zero;
@@ -482,6 +542,22 @@ namespace Game.World.Traps
                 Debug.LogWarning($"[CAVE STALACTITE] {name}: fall aborted safely ({reason}).", this);
 
             enabled = false;
+        }
+
+        private void ScheduleRemoval()
+        {
+            if (removalScheduled)
+                return;
+
+            removalScheduled = true;
+            SetDamageActive(false);
+            if (body != null)
+            {
+                body.velocity = Vector2.zero;
+                body.angularVelocity = 0f;
+            }
+
+            Destroy(gameObject);
         }
 
         private void ReportInvalidPlan(string reason)
@@ -517,6 +593,12 @@ namespace Game.World.Traps
         {
             if (embeddedPlatformCollider != null)
                 embeddedPlatformCollider.enabled = active;
+        }
+
+        private void SetEmbeddedAttackActive(bool active)
+        {
+            if (embeddedAttackCollider != null)
+                embeddedAttackCollider.enabled = active;
         }
 
         private Vector2 GetAnticipationZoneCenter(Vector2 rootPosition)
@@ -581,6 +663,12 @@ namespace Game.World.Traps
                 if (platformTransform != null)
                     embeddedPlatformCollider = platformTransform.GetComponent<BoxCollider2D>();
             }
+            if (embeddedAttackCollider == null)
+            {
+                Transform attackTransform = transform.Find("EmbeddedAttackTarget");
+                if (attackTransform != null)
+                    embeddedAttackCollider = attackTransform.GetComponent<BoxCollider2D>();
+            }
             if (prototypeVisual == null)
                 prototypeVisual = GetComponent<CaveStalactitePrototypeVisual>();
         }
@@ -600,6 +688,8 @@ namespace Game.World.Traps
                 fallingDamageCollider.isTrigger = true;
             if (embeddedPlatformCollider != null)
                 embeddedPlatformCollider.isTrigger = false;
+            if (embeddedAttackCollider != null)
+                embeddedAttackCollider.isTrigger = true;
         }
 
         private static PlayerHealth FindPlayerHealth(Collider2D candidate)
@@ -621,6 +711,7 @@ namespace Game.World.Traps
             fallSpeed = Mathf.Max(0.1f, fallSpeed);
             maximumFallDistance = Mathf.Max(0.1f, maximumFallDistance);
             collisionSkin = Mathf.Max(0f, collisionSkin);
+            hitsToDestroy = Mathf.Max(1, hitsToDestroy);
 
             ResolveReferences();
             ConfigurePhysics();
